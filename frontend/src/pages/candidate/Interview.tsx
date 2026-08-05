@@ -1,27 +1,22 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
-import apiClient from '../../api/client'
+import { candidateApiClient } from '../../api/client'
 import type { InterviewSession } from '../../types'
 
 export default function Interview() {
-  const { candidateId } = useParams()
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [current, setCurrent] = useState(0)
   const [answer, setAnswer] = useState('')
   const [finished, setFinished] = useState(false)
 
   async function start() {
-    const { data } = await apiClient.post<InterviewSession>('/interviews', {
-      candidate_id: Number(candidateId),
-      job_id: 1,
-    })
+    const { data } = await candidateApiClient.post<InterviewSession>('/interviews')
     setSession(data)
   }
 
   async function submitAnswer() {
     if (!session) return
     const question = session.questions[current]
-    await apiClient.post(`/interviews/${session.id}/answers`, {
+    await candidateApiClient.post(`/interviews/${session.id}/answers`, {
       question_id: question.id,
       transcript: answer,
     })
@@ -29,7 +24,7 @@ export default function Interview() {
     if (current + 1 < session.questions.length) {
       setCurrent(current + 1)
     } else {
-      await apiClient.post(`/interviews/${session.id}/finish`)
+      await candidateApiClient.post(`/interviews/${session.id}/finish`)
       setFinished(true)
     }
   }

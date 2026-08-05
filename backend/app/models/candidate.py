@@ -12,6 +12,7 @@ class Candidate(Base, TimestampMixin):
     full_name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     phone: Mapped[str] = mapped_column(String(50), nullable=True)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
 
     skills: Mapped[list["CandidateSkill"]] = relationship(

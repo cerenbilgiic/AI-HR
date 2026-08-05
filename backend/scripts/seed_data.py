@@ -1,8 +1,11 @@
 """Populate the local database with synthetic mock data (jobs, candidates, CVs, interviews).
 
 All data is hand-written/synthetic, not AI-generated -- no call to the AI
-provider is made here. Seeded HR users can log in with password
-"Password123!".
+provider is made here. Rerunning this script resets the seeded tables
+before inserting fresh data. Seeded HR users and candidates can all log
+in with password "Password123!" (HR via /auth/login, candidates via
+/auth/candidate-login). Seed content (job postings, interview Q&A, names)
+is in Turkish; code/comments stay in English per the rest of the codebase.
 
 Run with: python -m scripts.seed_data
 """
@@ -18,293 +21,301 @@ from app.models.user import Role, User
 
 SEED_PASSWORD = "Password123!"
 
+_ASCII_MAP = {
+    "ı": "i", "İ": "i", "I": "i",
+    "ş": "s", "Ş": "s",
+    "ğ": "g", "Ğ": "g",
+    "ç": "c", "Ç": "c",
+    "ö": "o", "Ö": "o",
+    "ü": "u", "Ü": "u",
+}
+
+
+def _ascii(text: str) -> str:
+    return "".join(_ASCII_MAP.get(ch, ch) for ch in text).lower()
+
+
+# Each candidate slot for a job is filled with one of these tiers, in order:
+# 3 completed interviews of varying quality, 1 interview in progress
+# (consented + questions generated, not yet answered), 1 not started yet
+# (no consent, no session -- just applied).
+TIER_ORDER = ["strong", "average", "weak", "in_progress", "not_started"]
+
+TIER_SCORES = {
+    "strong": {
+        "technical_competency": 8.0, "communication_skills": 8.5, "problem_solving": 8.0,
+        "job_role_compatibility": 8.5, "response_quality": 8.0, "confidence": 8.5,
+    },
+    "average": {
+        "technical_competency": 6.0, "communication_skills": 6.5, "problem_solving": 6.0,
+        "job_role_compatibility": 6.5, "response_quality": 6.0, "confidence": 6.5,
+    },
+    "weak": {
+        "technical_competency": 4.0, "communication_skills": 4.5, "problem_solving": 3.5,
+        "job_role_compatibility": 4.0, "response_quality": 3.5, "confidence": 4.5,
+    },
+}
+TIER_RECOMMENDATION = {"strong": "Öneriyorum", "average": "Değerlendirilebilir", "weak": "Önermiyorum"}
+TIER_SKILL_COUNT = {"strong": 3, "average": 1, "weak": 0, "in_progress": 1, "not_started": 0}
+
+GENERIC_ANSWERS = {
+    "average": [
+        "Sakin kalıp durumu yönetmeye çalışırım, gerekirse bir meslektaşımdan veya yöneticimden yardım isterim.",
+        "Elimden geleni yapıp işlerin sorunsuz ilerlemesini sağlamaya çalışırım, ama başlangıçta biraz yönlendirmeye ihtiyacım olabilir.",
+        "Bu pozisyonun deneyimime makul ölçüde uygun olduğunu düşünüyorum ve öğrenmeye hazırım.",
+        "Standart süreci takip eder ve düzenli olarak yöneticimle iletişimde kalırım.",
+    ],
+    "weak": [
+        "Tam olarak emin değilim, muhtemelen anlık karar veririm.",
+        "Bunu daha önce hiç düşünmemiştim.",
+        "Sanırım ilerledikçe çözerim.",
+        "Emin değilim, belki ekipten birine sorarım.",
+    ],
+}
+
+CV_TEMPLATES = {
+    "strong": "{job} pozisyonuyla doğrudan ilgili 3-5 yıllık deneyime sahip; {skills} konularında pratik becerileri var.",
+    "average": "{job} pozisyonuyla doğrudan ilgili olmasa da bir miktar perakende deneyimi var; {skills} konularının temellerine aşina.",
+    "weak": "{job} pozisyonuyla ilgili deneyimi sınırlı veya hiç yok; temel perakende becerilerini henüz geliştiriyor.",
+    "in_progress": "{job} pozisyonu için başvurusu sistemde kayıtlı; mülakat şu anda devam ediyor.",
+    "not_started": "{job} pozisyonuna yakın zamanda başvurdu; özgeçmişi sistemde, mülakat henüz planlanmadı.",
+}
+
+SUMMARY_TEMPLATES = {
+    "strong": "{name}, {job} pozisyonuyla net şekilde örtüşen, spesifik ve role uygun örnekler vererek açık bir iletişim sergiledi.",
+    "average": "{name}, {job} pozisyonu için makul ama oldukça genel cevaplar verdi; yeterli ama somut detaylardan yoksun.",
+    "weak": "{name}, {job} pozisyonu için somut ve kendinden emin cevaplar vermekte zorlandı; büyük olasılıkla ciddi bir oryantasyon desteğine ihtiyaç duyacaktır.",
+}
+
 JOBS = [
     {
-        "title": "Sales Associate",
-        "department": "Sales Floor",
-        "location": "Istanbul - Zorlu Center",
-        "description": (
-            "Assist customers on the shop floor, process transactions, restock "
-            "merchandise, and help meet store sales targets while delivering "
-            "excellent customer service."
-        ),
-        "skills": [("Customer Service", "Intermediate"), ("POS Systems", "Beginner"), ("Teamwork", "Intermediate")],
+        "title": "Satış Danışmanı",
+        "department": "Satış Katı",
+        "location": "İstanbul - Zorlu Center",
+        "description": "Mağaza katı müşterilerine yardımcı olmak, satış işlemlerini gerçekleştirmek, ürün stoklarını düzenlemek ve mükemmel müşteri hizmeti sunarak mağaza satış hedeflerine ulaşılmasına katkı sağlamak.",
+        "skills": [("Müşteri Hizmetleri", "Orta"), ("POS Sistemleri", "Başlangıç"), ("Takım Çalışması", "Orta")],
+        "questions": [
+            "Zor bir müşteriye yardımcı olduğunuz bir deneyimi anlatır mısınız?",
+            "Yoğun saatlerde mağaza katını nasıl yönetirsiniz?",
+            "Neden perakende satışta çalışmak istiyorsunuz?",
+            "Aylık satış hedefine nasıl ulaşırsınız?",
+        ],
+        "strong_answers": [
+            "Bir müşteri satın aldığı üründe kusur olduğunu söyleyerek şikayette bulunmuştu. Sakin kalıp özür diledim ve ürünü değiştirmeyi teklif ettim, sorun hızla çözüldü ve müşteri memnun ayrıldı.",
+            "Öncelikle kaybolmuş görünen müşterilere yönelirim, işlemleri hızlı tutarım ve rafların doldurulması için bir meslektaşımdan yardım isteyip kendim müşteri katına odaklanırım.",
+            "İnsanlarla iletişim kurmayı ve onlara aradıklarını bulmada yardımcı olmayı seviyorum, mağaza katının hızlı temposunu da seviyorum.",
+            "Ek ürün önerileri sunarak, düzenli müşterilerin tercihlerini hatırlayarak ve haftalık olarak rakamlarımı takip edip buna göre ayarlama yaparak hedefe ulaşmaya çalışırım.",
+        ],
     },
     {
-        "title": "Cashier",
-        "department": "Front End",
-        "location": "Ankara - Kizilay",
-        "description": (
-            "Operate the point-of-sale system, handle cash and card transactions "
-            "accurately, and provide a friendly checkout experience for customers."
-        ),
-        "skills": [("Cash Handling", "Intermediate"), ("Attention to Detail", "Intermediate"), ("Customer Service", "Beginner")],
+        "title": "Kasiyer",
+        "department": "Kasa Bölümü",
+        "location": "Ankara - Kızılay",
+        "description": "Kasa sistemini çalıştırmak, nakit ve kart işlemlerini eksiksiz gerçekleştirmek ve müşterilere hızlı, güler yüzlü bir ödeme deneyimi sunmak.",
+        "skills": [("Kasa Yönetimi", "Orta"), ("Detaylara Dikkat", "Orta"), ("Müşteri Hizmetleri", "Başlangıç")],
+        "questions": [
+            "Kasa dengeleme konusundaki deneyiminizi anlatır mısınız?",
+            "Bir müşterinin kartı reddedilirse ne yaparsınız?",
+            "Yoğunlukta doğruluğunuzu nasıl korursunuz?",
+            "Bir fiyat hatasını fark ettiğiniz bir durumu anlatır mısınız?",
+        ],
+        "strong_answers": [
+            "Üç yıl boyunca her akşam kasamı kapattım ve hiçbir zaman 5 liradan fazla fark olmadı, kapatmadan önce her zaman çift kontrol yaparım.",
+            "Müşteriyi utandırmadan sessizce başka bir ödeme yöntemi teklif eder ve sırayı aksatmadan devam ederim.",
+            "Sıra uzun olsa bile ürün okutma ve toplam kontrolünde biraz yavaşlarım, çünkü hatalar kazandırdığından daha fazla zaman kaybettirir.",
+            "Kasada bir kampanyanın doğru uygulanmadığını fark ettim ve daha fazla müşteriyi etkilemeden durumu yöneticime bildirdim.",
+        ],
     },
     {
-        "title": "Store Manager",
-        "department": "Management",
-        "location": "Izmir - Alsancak",
-        "description": (
-            "Oversee daily store operations, manage staff schedules, drive sales "
-            "performance, and ensure a high standard of customer experience."
-        ),
-        "skills": [("Leadership", "Advanced"), ("Inventory Management", "Intermediate"), ("Sales Strategy", "Advanced")],
+        "title": "Mağaza Müdürü",
+        "department": "Yönetim",
+        "location": "İzmir - Alsancak",
+        "description": "Mağazanın günlük operasyonlarını yönetmek, personel vardiyalarını planlamak, satış performansını artırmak ve yüksek standartta müşteri deneyimi sağlamak.",
+        "skills": [("Liderlik", "İleri"), ("Envanter Yönetimi", "Orta"), ("Satış Stratejisi", "İleri")],
+        "questions": [
+            "Performansı düşük bir ekip üyesini nasıl motive edersiniz?",
+            "Bir kampanya döneminde stok yetersizliğini nasıl yönetirsiniz?",
+            "Tatil sezonunda vardiya planlamasına yaklaşımınız nedir?",
+            "Mağazanızın başarısını satış rakamları dışında nasıl ölçersiniz?",
+        ],
+        "strong_answers": [
+            "Onunla özel olarak otururum, neyin engel olduğunu anlarım ve birlikte küçük, ulaşılabilir hedefler belirleriz.",
+            "Önce yakın mağazalardan transfer imkanını kontrol ederim, ardından yeniden stoklama zamanı konusunda müşterilerle açık iletişim kurarım.",
+            "Geçen yılın yoğunluk verilerine bakarım ve yoğun saatlerde yedek çağrılabilir personelle biraz fazla kadro bulundururum.",
+            "Müşteri iade oranı, personel devir hızı ve gizli müşteri puanları benim için ciro kadar önemli.",
+        ],
     },
     {
-        "title": "Assistant Store Manager",
-        "department": "Management",
-        "location": "Istanbul - Bagdat Caddesi",
-        "description": (
-            "Support the Store Manager in daily operations, supervise sales "
-            "associates, handle scheduling, and resolve customer or staffing issues."
-        ),
-        "skills": [("Team Leadership", "Intermediate"), ("Scheduling", "Intermediate"), ("Problem Solving", "Intermediate")],
+        "title": "Mağaza Müdür Yardımcısı",
+        "department": "Yönetim",
+        "location": "İstanbul - Bağdat Caddesi",
+        "description": "Mağaza Müdürüne günlük operasyonlarda destek olmak, satış danışmanlarını denetlemek, vardiya planlaması yapmak ve müşteri ya da personel kaynaklı sorunları çözmek.",
+        "skills": [("Takım Liderliği", "Orta"), ("Vardiya Planlama", "Orta"), ("Problem Çözme", "Orta")],
+        "questions": [
+            "Vardiya planlarken personel müsaitliğini mağaza ihtiyaçlarıyla nasıl dengelersiniz?",
+            "İki ekip üyesi arasındaki bir anlaşmazlığı çözdüğünüz bir durumu anlatır mısınız?",
+            "Bir acil durumda Mağaza Müdürüne ulaşamazsanız ne yaparsınız?",
+            "Durgun bir satış döneminde ekibi nasıl motive tutarsınız?",
+        ],
+        "strong_answers": [
+            "Önceden müsaitlik bilgisi toplarım, önce yoğun saatlerin kapsanmasına öncelik veririm, sonra mümkün olduğunca tercihlere yer açarım.",
+            "İki danışman mola saatleri konusunda anlaşamamıştı, iki tarafı da ayrı ayrı dinledim ve belirsizliği ortadan kaldıracak net bir rotasyon planı oluşturdum.",
+            "Mağazanın acil durum prosedürünü takip eder, alabileceğim en güvenli kararı alır ve kendisine ulaşır ulaşmaz her şeyi raporlarım.",
+            "Eğitim ve küçük süreç iyileştirmelerine odaklanırım, böylece geçen zaman yine de verimli hissettirir.",
+        ],
     },
     {
-        "title": "Warehouse Associate",
-        "department": "Logistics",
+        "title": "Depo Elemanı",
+        "department": "Lojistik",
         "location": "Kocaeli - Gebze",
-        "description": (
-            "Receive, sort, and store incoming merchandise, prepare outgoing "
-            "shipments, and maintain accurate inventory records in the warehouse."
-        ),
-        "skills": [("Inventory Handling", "Intermediate"), ("Forklift Operation", "Beginner"), ("Physical Stamina", "Advanced")],
+        "description": "Gelen ürünleri teslim almak, ayrıştırmak ve depolamak, giden sevkiyatları hazırlamak ve depo envanter kayıtlarının doğruluğunu sağlamak.",
+        "skills": [("Envanter Elleçleme", "Orta"), ("Forklift Kullanımı", "Başlangıç"), ("Fiziksel Dayanıklılık", "İleri")],
+        "questions": [
+            "Forklift kullanırken hangi güvenlik önlemlerine dikkat edersiniz?",
+            "Envanter doğruluğunu nasıl takip edersiniz?",
+            "Bir sevkiyatı zamanında yetiştirmek için zaman baskısı altında çalıştığınız bir durumu anlatır mısınız?",
+            "Tüm vardiya boyunca tekrarlayan fiziksel işleri nasıl yönetirsiniz?",
+        ],
+        "strong_answers": [
+            "Her zaman vardiya öncesi kontrol yaparım, işaretli koridorlara sadık kalırım ve kör noktalarda klakson çalarım.",
+            "Giren ve çıkan her ürünü okuturum ve farkları erken yakalamak için her vardiya sonunda örnek sayımlar yaparım.",
+            "Bayram öncesi yoğunlukta bir kamyonun erken kalkması gerekiyordu, öncelikli paletlerin önce çıkması için yükleme sırasını yeniden düzenledim.",
+            "Kendimi doğru tempoda tutarım, uygun kaldırma tekniği kullanırım ve mümkün olduğunda görevleri ekip arkadaşlarımla rotasyonlu yaparım.",
+        ],
     },
     {
-        "title": "Visual Merchandiser",
-        "department": "Marketing",
-        "location": "Istanbul - Nisantasi",
-        "description": (
-            "Design and maintain visually appealing product displays and store "
-            "layouts that align with brand guidelines and drive customer engagement."
-        ),
-        "skills": [("Creativity", "Advanced"), ("Visual Design", "Intermediate"), ("Attention to Detail", "Advanced")],
+        "title": "Vitrin ve Görsel Mağazacılık Uzmanı",
+        "department": "Pazarlama",
+        "location": "İstanbul - Nişantaşı",
+        "description": "Marka kimliğine uygun, görsel açıdan etkileyici ürün vitrinleri ve mağaza düzenleri tasarlamak ve bunları güncel tutarak müşteri ilgisini artırmak.",
+        "skills": [("Yaratıcılık", "İleri"), ("Görsel Tasarım", "Orta"), ("Detaylara Dikkat", "İleri")],
+        "questions": [
+            "Yeni bir sezon koleksiyonu için vitrin tasarımını nasıl kurgularsınız?",
+            "Hangi ürünleri birlikte sergileyeceğinize nasıl karar verirsiniz?",
+            "Gurur duyduğunuz bir vitrin tasarımını anlatır mısınız?",
+            "Bir vitrinin işe yarayıp yaramadığını nasıl ölçersiniz?",
+        ],
+        "strong_answers": [
+            "Vitrini tek bir sezonluk tema etrafında kurgularım, en yeni parçaları odak noktası yaparım ve tazeliğini korumak için stoğu iki haftada bir döndürüyorum.",
+            "Ürünleri renk uyumu ve kullanım amacına göre gruplarım, böylece vitrin müşterinin anında anlayabileceği hızlı bir görsel hikaye anlatır.",
+            "Ön vitrini tek renk temalı olarak yeniden tasarladım ve yaya trafiği fotoğrafları insanların belirgin şekilde daha fazla durup baktığını gösterdi.",
+            "Vitrin önünde geçirilen süreyi ve öne çıkan ürünlerdeki satış artışını önceki iki haftayla karşılaştırarak takip ederim.",
+        ],
+    },
+    {
+        "title": "Envanter Uzmanı",
+        "department": "Envanter Kontrol",
+        "location": "Bursa - Nilüfer",
+        "description": "Stok seviyelerini takip etmek, düzenli sayım yapmak, fiziksel stok ile sistem kayıtları arasındaki farkları gidermek ve depo ekibiyle koordineli şekilde stok tamamlama süreçlerini yürütmek.",
+        "skills": [("Envanter Sistemleri", "Orta"), ("Veri Girişi", "Orta"), ("Analitik Düşünme", "Orta")],
+        "questions": [
+            "Envanter sayımlarının zamanla doğru kalmasını nasıl sağlarsınız?",
+            "Sistem ile fiziksel stok arasında bir tutarsızlık bulduğunuz bir durumu anlatır mısınız?",
+            "Excel veya envanter yazılımlarıyla çalışma konusunda kendinizi ne kadar yeterli görüyorsunuz?",
+            "Yoğun bir haftada hangi ürünleri önce yeniden sayacağınıza nasıl karar verirsiniz?",
+        ],
+        "strong_answers": [
+            "Yüksek devir hızına sahip ürünlerde düzenli döngüsel sayımlar yaparım ve farkları küçük hatalar birikmeden aynı gün gideririm.",
+            "Bir kere sistemde 40 adet görünen bir üründen rafta sadece 25 adet olduğunu fark ettim, yanlış okutulmuş bir iade olduğunu tespit edip kaydı düzelttim.",
+            "Çok rahatım, envanter yönetim yazılımlarını günlük olarak kullandım ve fark takibi için temel Excel formülleri oluşturabiliyorum.",
+            "Önce yüksek değerli ve hızlı hareket eden ürünlerle başlarım çünkü buradaki tutarsızlıkların mağazaya etkisi en büyük olur.",
+        ],
+    },
+    {
+        "title": "Müşteri Deneyimi Uzmanı",
+        "department": "Müşteri Hizmetleri",
+        "location": "Antalya - Lara",
+        "description": "Mağaza içi ve telefonla gelen müşteri taleplerini karşılamak, şikayetleri çözmek, müşteri geri bildirimlerini toplamak ve mağazada yüksek memnuniyet seviyesini korumaya katkı sağlamak.",
+        "skills": [("İletişim", "İleri"), ("Çatışma Yönetimi", "Orta"), ("CRM Yazılımları", "Başlangıç")],
+        "questions": [
+            "İade politikasına kızgın bir müşteriyi nasıl yönetirsiniz?",
+            "Müşteri geri bildirimlerini nasıl toplar ve buna göre hareket edersiniz?",
+            "Olumsuz bir deneyimi olumluya çevirdiğiniz bir durumu anlatır mısınız?",
+            "Tekrarlayan şikayetler karşısında sabrınızı nasıl korursunuz?",
+        ],
+        "strong_answers": [
+            "Önce sözünü kesmeden tamamen dinlerim, hayal kırıklığını kabul ederim, sonra politikayı net şekilde açıklar ve sunabileceğim esneklikleri ararım.",
+            "Tekrar eden şikayetlerin basit bir kaydını tutarım ve sadece bireysel vakaları değil kök nedenleri çözebilmemiz için ayda bir yöneticimle paylaşırım.",
+            "Bir müşteri gecikmiş siparişi için üzgündü, bir sonraki alışverişinde indirim teklif ettim ve kişisel olarak takip ettim, sonrasında sadık bir müşteri haline geldi.",
+            "Müşterinin bana kişisel olarak kızmadığını hatırlarım ve tonuna değil, çözmem gereken spesifik soruna odaklanırım.",
+        ],
+    },
+    {
+        "title": "Tedarik Zinciri Analisti",
+        "department": "Tedarik Zinciri",
+        "location": "İstanbul - Maslak (Genel Merkez)",
+        "description": "Envanter ve sevkiyat verilerini analiz ederek tedarik zincirindeki verimsizlikleri tespit etmek, talep tahmini yapmak ve birden fazla mağaza lokasyonu için tedarikçi koordinasyonuna destek olmak.",
+        "skills": [("Veri Analizi", "İleri"), ("Excel/Tablolama", "İleri"), ("Tedarik Zinciri Planlama", "Orta")],
+        "questions": [
+            "Tedarik zincirinde bir darboğazı nasıl tespit edersiniz?",
+            "Sevkiyat veya envanter verilerini analiz etmek için hangi araçları kullanıyorsunuz?",
+            "Sezonluk bir ürün için talep tahminine nasıl yaklaşırsınız?",
+            "Analizinizin bir iş kararını değiştirdiği bir durumu anlatır mısınız?",
+        ],
+        "strong_answers": [
+            "Tedarikçiden mağazaya kadar her aşamada teslim sürelerine ve doluluk oranlarına bakarım, hedeften en çok sapan aşamayı işaretlerim.",
+            "Pivot tablolar ve temel modelleme için Excel'i rahatlıkla kullanıyorum, tedarikçi performansını zaman içinde takip etmek için dashboard araçları da kullandım.",
+            "Son iki-üç yılın sezonluk satış verilerine bakarım, kampanyalara göre düzeltme yaparım ve talep artışları için bir tampon payı bırakırım.",
+            "Analizim bir tedarikçinin sürekli sevkiyat gecikmesine neden olduğunu gösterdi, verileri sunduktan sonra siparişlerin bir kısmını yedek tedarikçiye kaydırdık ve gecikmeler belirgin şekilde azaldı.",
+        ],
+    },
+    {
+        "title": "E-Ticaret Operasyon Uzmanı",
+        "department": "E-Ticaret",
+        "location": "İstanbul - Maslak (Genel Merkez)",
+        "description": "Online siparişlerin doğru şekilde karşılanmasını yönetmek, sevkiyat doğruluğu için depo ekibiyle koordinasyon sağlamak, ürün listelemelerini güncellemek ve online mağaza performansını takip etmek.",
+        "skills": [("E-Ticaret Platformları", "Orta"), ("Sipariş Yönetimi", "Orta"), ("Detaylara Dikkat", "Orta")],
+        "questions": [
+            "Online siparişlerin doğru şekilde karşılanmasını nasıl sağlarsınız?",
+            "Bir online ürün ilanında yanlış bilgi olduğunu fark ederseniz ne yaparsınız?",
+            "Bir kampanya döneminde sipariş yoğunluğunu nasıl yönetirsiniz?",
+            "Kargo sorunlarında depo ekibiyle nasıl koordine olursunuz?",
+        ],
+        "strong_answers": [
+            "Sipariş kargoya çıkmadan önce detaylarını paket fişiyle karşılaştırırım ve stokla uyuşmayan siparişler için uyarılar kurarım.",
+            "Hemen düzeltirim, son siparişlerin bundan etkilenip etkilenmediğini kontrol ederim, etkilenmişse ilgili müşterileri bilgilendiririm.",
+            "Siparişleri önce kargo son teslim tarihine göre önceliklendiririm, stoğu azalan ürünleri işaretleyerek fazla satışı önlerim.",
+            "Yoğun dönemlerde her sabah depo sorumlusuyla görüşürüm ve takılan siparişler için ortak bir takip listesi tutarım.",
+        ],
     },
 ]
 
-# Two candidates per job (same order as JOBS). The first of each pair has
-# completed an interview (with full scores/report); the second is still
-# earlier in the funnel (invited, no consent/interview yet).
-CANDIDATES = [
-    # -- Sales Associate --
-    {
-        "job_index": 0,
-        "full_name": "Ayse Yilmaz",
-        "email": "ayse.yilmaz@example.com",
-        "phone": "+90 532 111 2233",
-        "skills": ["Customer Service", "Teamwork"],
-        "cv_text": (
-            "2 years of experience as a cashier at a supermarket chain. Handled "
-            "customer complaints, worked in a fast-paced environment, trained two "
-            "new cashiers. Comfortable with POS systems and basic inventory tracking."
-        ),
-        "interview": {
-            "qa": [
-                ("Tell me about a time you helped a difficult customer.", "A customer once complained that a product was defective. I stayed calm, apologized, and offered an exchange, which resolved it quickly and she left happy."),
-                ("How do you handle a busy shop floor during peak hours?", "I prioritize customers who look lost first, keep transactions quick, and ask a colleague to restock while I focus on the floor."),
-                ("Why do you want to work in retail sales?", "I enjoy talking to people and helping them find what they need, and I like the fast pace of a sales floor."),
-                ("How would you meet a monthly sales target?", "I'd focus on suggestive selling, remembering regular customers' preferences, and tracking my numbers weekly to adjust."),
-            ],
-            "scores": {
-                "technical_competency": 7.0, "communication_skills": 8.5, "problem_solving": 7.5,
-                "job_role_compatibility": 8.0, "response_quality": 7.5, "confidence": 8.0, "overall_score": 7.75,
-            },
-            "summary": "Ayse has solid customer-facing experience and communicates clearly and confidently. Her answers show she can stay calm under pressure and prioritize well during busy periods.",
-            "recommendation": "Recommend",
-        },
-    },
-    {
-        "job_index": 0,
-        "full_name": "Mert Aydin",
-        "email": "mert.aydin@example.com",
-        "phone": "+90 533 222 3344",
-        "skills": ["Customer Service"],
-        "cv_text": "Recent high school graduate, part-time experience helping at a family-owned shop on weekends.",
-        "interview": None,
-    },
-    # -- Cashier --
-    {
-        "job_index": 1,
-        "full_name": "Zeynep Kaya",
-        "email": "zeynep.kaya@example.com",
-        "phone": "+90 534 333 4455",
-        "skills": ["Cash Handling", "Attention to Detail"],
-        "cv_text": (
-            "3 years as a cashier at a convenience store chain. Balanced the till "
-            "daily with zero discrepancies, processed returns, and handled loyalty "
-            "card sign-ups."
-        ),
-        "interview": {
-            "qa": [
-                ("Describe your experience balancing a cash register.", "I closed my till every night for three years and never had a discrepancy over 5 lira, I always double count before closing."),
-                ("What would you do if a customer's card was declined?", "I'd quietly offer another payment method and keep the line moving so they don't feel embarrassed."),
-                ("How do you stay accurate during a rush?", "I slow down slightly on the actual scanning and totals even when the line is long, because mistakes cost more time than they save."),
-                ("Tell me about a time you caught a pricing error.", "I noticed a promotion wasn't applying correctly at checkout and flagged it to my supervisor before it affected more customers."),
-            ],
-            "scores": {
-                "technical_competency": 8.5, "communication_skills": 7.5, "problem_solving": 8.0,
-                "job_role_compatibility": 8.5, "response_quality": 8.0, "confidence": 7.5, "overall_score": 8.0,
-            },
-            "summary": "Zeynep has strong, directly relevant cash-handling experience and a clear attention to accuracy. She communicates practically and gives concrete examples.",
-            "recommendation": "Recommend",
-        },
-    },
-    {
-        "job_index": 1,
-        "full_name": "Burak Sahin",
-        "email": "burak.sahin@example.com",
-        "phone": "+90 535 444 5566",
-        "skills": [],
-        "cv_text": "No prior retail experience, worked as a delivery courier for one year.",
-        "interview": None,
-    },
-    # -- Store Manager --
-    {
-        "job_index": 2,
-        "full_name": "Elif Demir",
-        "email": "elif.demir@example.com",
-        "phone": "+90 536 555 6677",
-        "skills": ["Leadership", "Inventory Management"],
-        "cv_text": (
-            "5 years in retail, last 2 as Assistant Store Manager for a clothing "
-            "brand. Managed a team of 8, ran monthly inventory counts, and improved "
-            "store sales by 12% year over year."
-        ),
-        "interview": {
-            "qa": [
-                ("How do you motivate an underperforming team member?", "I sit down with them privately, understand what's blocking them, and set small achievable goals together."),
-                ("Walk me through how you'd handle a stock shortage during a sale event.", "I'd check nearby store inventory for transfers first, then communicate clearly to customers about restock timing."),
-                ("What's your approach to scheduling during holiday season?", "I look at last year's traffic data and overstaff slightly during peak hours, with backup on-call staff."),
-                ("How do you measure your store's success beyond sales numbers?", "Customer return rate, staff turnover, and mystery shopper scores all matter to me as much as revenue."),
-            ],
-            "scores": {
-                "technical_competency": 7.5, "communication_skills": 7.0, "problem_solving": 7.0,
-                "job_role_compatibility": 7.0, "response_quality": 6.5, "confidence": 7.5, "overall_score": 7.08,
-            },
-            "summary": "Elif has relevant management experience and gives reasonable, if somewhat generic, answers. Her leadership examples are believable but lack specific measurable outcomes.",
-            "recommendation": "Consider",
-        },
-    },
-    {
-        "job_index": 2,
-        "full_name": "Can Ozturk",
-        "email": "can.ozturk@example.com",
-        "phone": "+90 537 666 7788",
-        "skills": ["Leadership"],
-        "cv_text": "3 years as a Sales Associate, no formal management experience yet.",
-        "interview": None,
-    },
-    # -- Assistant Store Manager --
-    {
-        "job_index": 3,
-        "full_name": "Deniz Celik",
-        "email": "deniz.celik@example.com",
-        "phone": "+90 538 777 8899",
-        "skills": ["Team Leadership", "Scheduling"],
-        "cv_text": (
-            "4 years in retail, 1 year as a shift supervisor. Created weekly staff "
-            "schedules for a team of 6 and handled day-to-day customer escalations."
-        ),
-        "interview": {
-            "qa": [
-                ("How do you balance staff availability with store needs when scheduling?", "I collect availability in advance, prioritize covering peak hours first, then fit in preferences where possible."),
-                ("Describe a time you resolved a conflict between two team members.", "Two associates disagreed over break times, I heard both sides separately then set a clear rotating schedule to remove the ambiguity."),
-                ("What would you do if the Store Manager was unreachable during an emergency?", "I'd follow the store's escalation procedure and make the safest call I could, then report everything once they're reachable."),
-                ("How do you keep the team motivated during a slow sales period?", "I focus on training and small process improvements so the time still feels productive."),
-            ],
-            "scores": {
-                "technical_competency": 7.0, "communication_skills": 7.5, "problem_solving": 7.5,
-                "job_role_compatibility": 7.5, "response_quality": 7.0, "confidence": 7.0, "overall_score": 7.25,
-            },
-            "summary": "Deniz shows practical supervisory experience and handles interpersonal conflict examples well. Answers are grounded and specific.",
-            "recommendation": "Recommend",
-        },
-    },
-    {
-        "job_index": 3,
-        "full_name": "Selin Arslan",
-        "email": "selin.arslan@example.com",
-        "phone": "+90 539 888 9900",
-        "skills": ["Scheduling"],
-        "cv_text": "2 years as a Cashier, expressed interest in moving into a supervisory role.",
-        "interview": None,
-    },
-    # -- Warehouse Associate --
-    {
-        "job_index": 4,
-        "full_name": "Emre Dogan",
-        "email": "emre.dogan@example.com",
-        "phone": "+90 541 999 0011",
-        "skills": ["Inventory Handling", "Physical Stamina"],
-        "cv_text": (
-            "2 years working in a distribution center, experienced with barcode "
-            "scanners and pallet organization, licensed forklift operator."
-        ),
-        "interview": {
-            "qa": [
-                ("What safety precautions do you follow when operating a forklift?", "I always do a pre-shift inspection, keep to marked lanes, and sound the horn at blind corners."),
-                ("How do you keep track of inventory accuracy?", "I scan every item in and out and do spot counts at the end of each shift to catch discrepancies early."),
-                ("Describe a time you had to work under time pressure to get a shipment out.", "During a holiday rush we had a truck leaving early, I reorganized the loading order to get priority pallets out first."),
-                ("How do you handle repetitive physical work over a full shift?", "I pace myself, use proper lifting technique, and rotate tasks with teammates when possible."),
-            ],
-            "scores": {
-                "technical_competency": 7.5, "communication_skills": 6.0, "problem_solving": 6.5,
-                "job_role_compatibility": 8.0, "response_quality": 6.5, "confidence": 6.5, "overall_score": 6.83,
-            },
-            "summary": "Emre has directly relevant warehouse experience and solid safety awareness. Communication is a bit terse but answers are technically sound.",
-            "recommendation": "Consider",
-        },
-    },
-    {
-        "job_index": 4,
-        "full_name": "Gizem Kilic",
-        "email": "gizem.kilic@example.com",
-        "phone": "+90 542 000 1122",
-        "skills": [],
-        "cv_text": "No warehouse experience, worked in food service for 1 year.",
-        "interview": None,
-    },
-    # -- Visual Merchandiser --
-    {
-        "job_index": 5,
-        "full_name": "Cem Aksoy",
-        "email": "cem.aksoy@example.com",
-        "phone": "+90 543 111 2233",
-        "skills": ["Creativity", "Visual Design"],
-        "cv_text": "1 year as a Sales Associate with an interest in store design, self-taught in basic visual merchandising principles.",
-        "interview": {
-            "qa": [
-                ("How would you design a window display for a new seasonal collection?", "I'd probably use bright colors and put the newest items in the front."),
-                ("How do you decide what products to feature together?", "Things that look good together colorwise, I guess."),
-                ("Tell me about a display you're proud of.", "I rearranged a shelf once and my manager said it looked nicer."),
-                ("How do you measure whether a display is working?", "I'm not totally sure, maybe if people stop and look at it."),
-            ],
-            "scores": {
-                "technical_competency": 4.5, "communication_skills": 5.5, "problem_solving": 5.0,
-                "job_role_compatibility": 5.0, "response_quality": 4.5, "confidence": 5.0, "overall_score": 4.92,
-            },
-            "summary": "Cem shows genuine interest but lacks concrete visual merchandising experience or vocabulary. Answers are vague and would benefit from a stronger portfolio or training background.",
-            "recommendation": "Do Not Recommend",
-        },
-    },
-    {
-        "job_index": 5,
-        "full_name": "Buse Yildiz",
-        "email": "buse.yildiz@example.com",
-        "phone": "+90 544 222 3344",
-        "skills": ["Creativity"],
-        "cv_text": "Graphic design student, no retail experience yet.",
-        "interview": None,
-    },
+# 5 unique (first, last) display names per job, positionally aligned with TIER_ORDER.
+NAMES_BY_JOB = [
+    [("Ayşe", "Yılmaz"), ("Deniz", "Özkan"), ("Mert", "Aydın"), ("Barış", "Kurt"), ("Nazlı", "Şimşek")],
+    [("Zeynep", "Kaya"), ("Umut", "Bulut"), ("Burak", "Şahin"), ("Ece", "Polat"), ("Serkan", "Taş")],
+    [("Elif", "Demir"), ("Yusuf", "Özdemir"), ("Can", "Öztürk"), ("Sıla", "Çetin"), ("Onur", "Güler")],
+    [("Deniz", "Çelik"), ("Aylin", "Erdoğan"), ("Selin", "Arslan"), ("Kerem", "Aslan"), ("İrem", "Koç")],
+    [("Emre", "Doğan"), ("Ceyda", "Turan"), ("Gizem", "Kılıç"), ("Berk", "Yıldız"), ("Nazlı", "Kurt")],
+    [("Cem", "Aksoy"), ("Buse", "Yıldız"), ("Onur", "Aksoy"), ("Ece", "Şimşek"), ("Kerem", "Bulut")],
+    [("Barış", "Özdemir"), ("Sıla", "Aydın"), ("Umut", "Çelik"), ("İrem", "Taş"), ("Can", "Bulut")],
+    [("Ece", "Aksoy"), ("Berk", "Demir"), ("Nazlı", "Öztürk"), ("Yusuf", "Kaya"), ("Selin", "Doğan")],
+    [("Onur", "Erdoğan"), ("Aylin", "Kılıç"), ("Kerem", "Özkan"), ("Ceyda", "Yılmaz"), ("Burak", "Güler")],
+    [("Sıla", "Polat"), ("Deniz", "Aksoy"), ("Emre", "Şimşek"), ("Zeynep", "Özdemir"), ("Mert", "Güler")],
 ]
+
+
+def _phone(i: int) -> str:
+    return f"+90 5{30 + i % 10} {100 + (i * 37) % 900} {1000 + (i * 91) % 9000}"
+
+
+def _overall(scores: dict) -> float:
+    return round(sum(scores.values()) / len(scores), 2)
+
+
+def _clear_existing_data(db) -> None:
+    for model in [
+        CandidateAnswer, InterviewQuestion, AIScore, InterviewReport, InterviewSession,
+        ConsentRecord, CandidateSkill, CandidateCV, Candidate, JobSkill, Job, User, Role,
+    ]:
+        db.query(model).delete()
+    db.commit()
 
 
 def run() -> None:
     db = SessionLocal()
     try:
-        if db.query(Role).count() > 0:
-            print("Database already seeded, skipping.")
-            return
+        _clear_existing_data(db)
 
         hr_role = Role(name="hr")
         admin_role = Role(name="admin")
@@ -317,77 +328,99 @@ def run() -> None:
             full_name="Elif Kaya",
             role_id=hr_role.id,
         )
+        hr_user_2 = User(
+            email="hr2@retailco.example.com",
+            hashed_password=hash_password(SEED_PASSWORD),
+            full_name="Kadir Şen",
+            role_id=hr_role.id,
+        )
         admin_user = User(
             email="admin@retailco.example.com",
             hashed_password=hash_password(SEED_PASSWORD),
-            full_name="Mehmet Yildirim",
+            full_name="Mehmet Yıldırım",
             role_id=admin_role.id,
         )
-        db.add_all([hr_user, admin_user])
+        db.add_all([hr_user, hr_user_2, admin_user])
         db.flush()
 
-        jobs = []
-        for job_data in JOBS:
+        candidate_index = 0
+        total_candidates = 0
+
+        for job_index, job_data in enumerate(JOBS):
             job = Job(
                 title=job_data["title"],
                 description=job_data["description"],
                 department=job_data["department"],
                 location=job_data["location"],
-                created_by_id=hr_user.id,
+                created_by_id=hr_user.id if job_index % 2 == 0 else hr_user_2.id,
                 skills=[JobSkill(name=name, required_level=level) for name, level in job_data["skills"]],
             )
             db.add(job)
-            jobs.append(job)
-        db.flush()
-
-        for candidate_data in CANDIDATES:
-            job = jobs[candidate_data["job_index"]]
-            candidate = Candidate(
-                full_name=candidate_data["full_name"],
-                email=candidate_data["email"],
-                phone=candidate_data["phone"],
-                job_id=job.id,
-                skills=[CandidateSkill(name=name) for name in candidate_data["skills"]],
-                cvs=[CandidateCV(
-                    file_path=f"/mock-cvs/{candidate_data['email'].split('@')[0]}.pdf",
-                    parsed_text=candidate_data["cv_text"],
-                )],
-            )
-            db.add(candidate)
             db.flush()
 
-            interview = candidate_data["interview"]
-            if interview is None:
-                continue
+            for tier, (first, last) in zip(TIER_ORDER, NAMES_BY_JOB[job_index]):
+                full_name = f"{first} {last}"
+                skill_names = [name for name, _level in job_data["skills"][: TIER_SKILL_COUNT[tier]]]
+                cv_text = CV_TEMPLATES[tier].format(
+                    job=job_data["title"],
+                    skills=", ".join(name for name, _level in job_data["skills"]),
+                )
 
-            db.add(ConsentRecord(
-                candidate_id=candidate.id,
-                camera_access=True,
-                microphone_access=True,
-                audio_recording=True,
-                video_recording=True,
-                ai_evaluation=True,
-            ))
-
-            session = InterviewSession(candidate_id=candidate.id, job_id=job.id, status="completed")
-            db.add(session)
-            db.flush()
-
-            for order, (question_text, answer_text) in enumerate(interview["qa"]):
-                question = InterviewQuestion(session_id=session.id, text=question_text, order=order)
-                db.add(question)
+                candidate = Candidate(
+                    full_name=full_name,
+                    email=f"{_ascii(first)}.{_ascii(last)}@example.com",
+                    phone=_phone(candidate_index),
+                    hashed_password=hash_password(SEED_PASSWORD),
+                    job_id=job.id,
+                    skills=[CandidateSkill(name=name) for name in skill_names],
+                    cvs=[CandidateCV(file_path=f"/mock-cvs/{_ascii(first)}-{_ascii(last)}.pdf", parsed_text=cv_text)],
+                )
+                db.add(candidate)
                 db.flush()
-                db.add(CandidateAnswer(session_id=session.id, question_id=question.id, transcript=answer_text))
+                candidate_index += 1
+                total_candidates += 1
 
-            db.add(AIScore(session_id=session.id, **interview["scores"]))
-            db.add(InterviewReport(
-                session_id=session.id,
-                summary=interview["summary"],
-                recommendation=interview["recommendation"],
-            ))
+                if tier == "not_started":
+                    continue
+
+                db.add(ConsentRecord(
+                    candidate_id=candidate.id,
+                    camera_access=True,
+                    microphone_access=True,
+                    audio_recording=True,
+                    video_recording=True,
+                    ai_evaluation=True,
+                ))
+
+                session_status = "completed" if tier != "in_progress" else "in_progress"
+                session = InterviewSession(candidate_id=candidate.id, job_id=job.id, status=session_status)
+                db.add(session)
+                db.flush()
+
+                for order, question_text in enumerate(job_data["questions"]):
+                    question = InterviewQuestion(session_id=session.id, text=question_text, order=order)
+                    db.add(question)
+                    db.flush()
+
+                    if tier == "in_progress":
+                        continue
+
+                    answer_text = (
+                        job_data["strong_answers"][order] if tier == "strong" else GENERIC_ANSWERS[tier][order]
+                    )
+                    db.add(CandidateAnswer(session_id=session.id, question_id=question.id, transcript=answer_text))
+
+                if tier in TIER_SCORES:
+                    scores = TIER_SCORES[tier]
+                    db.add(AIScore(session_id=session.id, **scores, overall_score=_overall(scores)))
+                    db.add(InterviewReport(
+                        session_id=session.id,
+                        summary=SUMMARY_TEMPLATES[tier].format(name=full_name, job=job_data["title"]),
+                        recommendation=TIER_RECOMMENDATION[tier],
+                    ))
 
         db.commit()
-        print(f"Seeded {len(jobs)} jobs and {len(CANDIDATES)} candidates.")
+        print(f"Seeded {len(JOBS)} jobs and {total_candidates} candidates (3 users).")
         print(f"HR login: hr@retailco.example.com / {SEED_PASSWORD}")
     finally:
         db.close()

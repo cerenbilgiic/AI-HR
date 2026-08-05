@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 
+from app.models.candidate import Candidate
 from app.models.job import Job, JobSkill
-from app.schemas.job import JobCreate
+from app.schemas.job import JobCreate, JobSkillIn, JobSkillUpdate, JobUpdate
 
 
 def list_jobs(db: Session) -> list[Job]:
@@ -25,3 +26,43 @@ def create_job(db: Session, data: JobCreate, created_by_id: int) -> Job:
     db.commit()
     db.refresh(job)
     return job
+
+
+def update_job(db: Session, job: Job, data: JobUpdate) -> Job:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(job, field, value)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def delete_job(db: Session, job: Job) -> None:
+    if db.query(Candidate).filter(Candidate.job_id == job.id).first() is not None:
+        raise ValueError("Cannot delete a job that has candidates")
+    db.delete(job)
+    db.commit()
+
+
+def add_job_skill(db: Session, job: Job, data: JobSkillIn) -> JobSkill:
+    skill = JobSkill(job_id=job.id, name=data.name, required_level=data.required_level)
+    db.add(skill)
+    db.commit()
+    db.refresh(skill)
+    return skill
+
+
+def get_job_skill(db: Session, job_id: int, skill_id: int) -> JobSkill | None:
+    return db.query(JobSkill).filter(JobSkill.id == skill_id, JobSkill.job_id == job_id).first()
+
+
+def update_job_skill(db: Session, skill: JobSkill, data: JobSkillUpdate) -> JobSkill:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(skill, field, value)
+    db.commit()
+    db.refresh(skill)
+    return skill
+
+
+def delete_job_skill(db: Session, skill: JobSkill) -> None:
+    db.delete(skill)
+    db.commit()

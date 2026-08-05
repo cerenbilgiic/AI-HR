@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import apiClient from '../../api/client'
+import { candidateApiClient } from '../../api/client'
 
 const CONSENT_ITEMS = [
   { key: 'camera_access', label: 'Camera access' },
@@ -26,7 +26,7 @@ export default function Consent() {
   const allAccepted = Object.values(accepted).every(Boolean)
 
   async function handleContinue() {
-    await apiClient.post(`/candidates/${candidateId}/consent`, accepted)
+    await candidateApiClient.post(`/candidates/${candidateId}/consent`, accepted)
     navigate(`/interview/${candidateId}/start`)
   }
 

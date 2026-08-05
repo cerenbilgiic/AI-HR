@@ -12,12 +12,24 @@ class JobSkillOut(JobSkillIn):
     model_config = {"from_attributes": True}
 
 
+class JobSkillUpdate(BaseModel):
+    name: str | None = None
+    required_level: str | None = None
+
+
 class JobCreate(BaseModel):
     title: str
     description: str
     department: str | None = None
     location: str | None = None
     skills: list[JobSkillIn] = []
+
+
+class JobUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    department: str | None = None
+    location: str | None = None
 
 
 class JobOut(BaseModel):

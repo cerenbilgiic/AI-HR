@@ -4,18 +4,23 @@ from app.models.ai_score import AIScore, InterviewReport
 from app.models.candidate import Candidate
 from app.models.interview import CandidateAnswer, InterviewQuestion, InterviewSession
 from app.models.job import Job
-from app.schemas.interview import AnswerSubmit, InterviewSessionCreate
+from app.schemas.interview import (
+    AnswerSubmit,
+    InterviewQuestionCreate,
+    InterviewQuestionUpdate,
+    InterviewSessionStatusUpdate,
+)
+from app.schemas.report import AIScoreUpdate, InterviewReportUpdate
 from app.services.ai import get_ai_provider
 
 
-def create_session(db: Session, data: InterviewSessionCreate) -> InterviewSession:
-    candidate = db.get(Candidate, data.candidate_id)
-    job = db.get(Job, data.job_id)
+def create_session(db: Session, candidate: Candidate) -> InterviewSession:
+    job = db.get(Job, candidate.job_id)
 
-    cv_text = candidate.cvs[-1].parsed_text if candidate and candidate.cvs else ""
+    cv_text = candidate.cvs[-1].parsed_text if candidate.cvs else ""
     job_description = job.description if job else ""
 
-    session = InterviewSession(candidate_id=data.candidate_id, job_id=data.job_id, status="in_progress")
+    session = InterviewSession(candidate_id=candidate.id, job_id=candidate.job_id, status="in_progress")
     questions = get_ai_provider().generate_questions(cv_text, job_description)
     session.questions = [
         InterviewQuestion(text=text, order=i) for i, text in enumerate(questions)
@@ -29,6 +34,64 @@ def create_session(db: Session, data: InterviewSessionCreate) -> InterviewSessio
 
 def get_session(db: Session, session_id: int) -> InterviewSession | None:
     return db.get(InterviewSession, session_id)
+
+
+def list_sessions(
+    db: Session, candidate_id: int | None = None, job_id: int | None = None
+) -> list[InterviewSession]:
+    query = db.query(InterviewSession)
+    if candidate_id is not None:
+        query = query.filter(InterviewSession.candidate_id == candidate_id)
+    if job_id is not None:
+        query = query.filter(InterviewSession.job_id == job_id)
+    return query.all()
+
+
+def update_session_status(
+    db: Session, session: InterviewSession, data: InterviewSessionStatusUpdate
+) -> InterviewSession:
+    session.status = data.status
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def delete_session(db: Session, session: InterviewSession) -> None:
+    db.query(AIScore).filter(AIScore.session_id == session.id).delete()
+    db.query(InterviewReport).filter(InterviewReport.session_id == session.id).delete()
+    db.delete(session)
+    db.commit()
+
+
+def add_question(db: Session, session: InterviewSession, data: InterviewQuestionCreate) -> InterviewQuestion:
+    question = InterviewQuestion(
+        session_id=session.id, text=data.text, order=data.order, is_follow_up=data.is_follow_up
+    )
+    db.add(question)
+    db.commit()
+    db.refresh(question)
+    return question
+
+
+def get_question(db: Session, session_id: int, question_id: int) -> InterviewQuestion | None:
+    return (
+        db.query(InterviewQuestion)
+        .filter(InterviewQuestion.id == question_id, InterviewQuestion.session_id == session_id)
+        .first()
+    )
+
+
+def update_question(db: Session, question: InterviewQuestion, data: InterviewQuestionUpdate) -> InterviewQuestion:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(question, field, value)
+    db.commit()
+    db.refresh(question)
+    return question
+
+
+def delete_question(db: Session, question: InterviewQuestion) -> None:
+    db.delete(question)
+    db.commit()
 
 
 def submit_answer(db: Session, session_id: int, data: AnswerSubmit) -> CandidateAnswer:
@@ -73,6 +136,30 @@ def finalize_session(db: Session, session_id: int) -> InterviewReport:
     session.status = "completed"
 
     db.add_all([ai_score, report])
+    db.commit()
+    db.refresh(report)
+    return report
+
+
+def get_score(db: Session, session_id: int) -> AIScore | None:
+    return db.query(AIScore).filter(AIScore.session_id == session_id).first()
+
+
+def update_score(db: Session, score: AIScore, data: AIScoreUpdate) -> AIScore:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(score, field, value)
+    db.commit()
+    db.refresh(score)
+    return score
+
+
+def get_report(db: Session, session_id: int) -> InterviewReport | None:
+    return db.query(InterviewReport).filter(InterviewReport.session_id == session_id).first()
+
+
+def update_report(db: Session, report: InterviewReport, data: InterviewReportUpdate) -> InterviewReport:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(report, field, value)
     db.commit()
     db.refresh(report)
     return report

@@ -1,7 +1,6 @@
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 
 export default function Invitation() {
-  const { candidateId } = useParams()
   const navigate = useNavigate()
 
   return (
@@ -13,7 +12,7 @@ export default function Invitation() {
         responses.
       </p>
       <button
-        onClick={() => navigate(`/interview/${candidateId}/consent`)}
+        onClick={() => navigate('/interview/login')}
         className="rounded bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
       >
         Get started
