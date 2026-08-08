@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
 
     ollama_host: str = "http://localhost:11434"
-    ollama_model: str = "qwen3:8b"
+    ollama_model: str = "qwen2.5:7b"
 
     whisper_model: str = "base"
     whisper_device: str = "cuda"

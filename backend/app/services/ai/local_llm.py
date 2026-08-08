@@ -1,4 +1,5 @@
 import json
+import re
 
 import ollama
 
@@ -6,6 +7,12 @@ from app.core.config import settings
 from app.services.ai import prompts
 from app.services.ai.base import AIProvider
 from app.services.ai.local_stt import LocalWhisperSTT
+
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+
+
+def _strip_json_fence(text: str) -> str:
+    return _JSON_FENCE_RE.sub("", text.strip())
 
 
 class LocalOllamaProvider(AIProvider):
@@ -37,13 +44,13 @@ class LocalOllamaProvider(AIProvider):
         prompt = prompts.ANSWER_EVALUATION_PROMPT.format(
             job_description=job_description, question=question, answer=answer
         )
-        return json.loads(self._chat(prompt))
+        return json.loads(_strip_json_fence(self._chat(prompt)))
 
     def generate_report(self, transcript: list[dict], job_description: str) -> dict:
         prompt = prompts.REPORT_GENERATION_PROMPT.format(
             job_description=job_description, transcript=json.dumps(transcript)
         )
-        return json.loads(self._chat(prompt))
+        return json.loads(_strip_json_fence(self._chat(prompt)))
 
     def transcribe(self, audio_path: str) -> str:
         return self._stt.transcribe(audio_path)
