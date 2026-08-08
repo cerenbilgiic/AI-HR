@@ -29,6 +29,8 @@ class InterviewQuestion(Base, TimestampMixin):
     text: Mapped[str] = mapped_column(Text)
     order: Mapped[int] = mapped_column(default=0)
     is_follow_up: Mapped[bool] = mapped_column(default=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=True)
+    difficulty: Mapped[str] = mapped_column(String(20), nullable=True)
 
     session: Mapped["InterviewSession"] = relationship(back_populates="questions")
     answer: Mapped["CandidateAnswer"] = relationship(back_populates="question", uselist=False)

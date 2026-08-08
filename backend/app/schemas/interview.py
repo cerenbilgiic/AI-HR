@@ -6,6 +6,8 @@ class InterviewQuestionOut(BaseModel):
     text: str
     order: int
     is_follow_up: bool
+    category: str | None = None
+    difficulty: str | None = None
 
     model_config = {"from_attributes": True}
 

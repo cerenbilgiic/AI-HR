@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 
 
+class AIResponseError(RuntimeError):
+    """Raised when the LLM's response doesn't match the JSON shape a caller expects."""
+
+
 class AIProvider(ABC):
     """Interface for the AI backend used by the interview flow.
 
@@ -10,11 +14,19 @@ class AIProvider(ABC):
     """
 
     @abstractmethod
-    def generate_questions(self, cv_text: str, job_description: str, count: int = 5) -> list[str]:
+    def generate_questions(
+        self, cv_text: str, job_description: str, required_skills: str, count: int = 5
+    ) -> list[dict]:
         ...
 
     @abstractmethod
     def generate_follow_up(self, question: str, answer: str) -> str | None:
+        ...
+
+    @abstractmethod
+    def evaluate_and_adapt(
+        self, job_description: str, cv_text: str, previous_question: str, candidate_answer: str
+    ) -> dict:
         ...
 
     @abstractmethod

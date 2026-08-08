@@ -16,6 +16,7 @@ from app.schemas.interview import (
 )
 from app.schemas.report import InterviewReportOut
 from app.services import interview_service
+from app.services.ai.base import AIResponseError
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
@@ -41,7 +42,10 @@ def create_session(
     db: Session = Depends(get_db),
     current_candidate: Candidate = Depends(get_current_candidate),
 ) -> InterviewSessionOut:
-    return interview_service.create_session(db, current_candidate)
+    try:
+        return interview_service.create_session(db, current_candidate)
+    except AIResponseError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[InterviewSessionOut])
@@ -101,7 +105,10 @@ def finish_session(
     current_candidate: Candidate = Depends(get_current_candidate),
 ) -> InterviewReportOut:
     _get_owned_session(db, session_id, current_candidate)
-    return interview_service.finalize_session(db, session_id)
+    try:
+        return interview_service.finalize_session(db, session_id)
+    except AIResponseError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 @router.post("/{session_id}/questions", response_model=InterviewQuestionOut, status_code=status.HTTP_201_CREATED)

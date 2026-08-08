@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.models.ai_evaluation import AIEvaluation
 from app.models.ai_score import AIScore, InterviewReport
 from app.models.candidate import Candidate
 from app.models.interview import CandidateAnswer, InterviewQuestion, InterviewSession
@@ -13,23 +14,110 @@ from app.schemas.interview import (
 from app.schemas.report import AIScoreUpdate, InterviewReportUpdate
 from app.services.ai import get_ai_provider
 
+MAX_ADAPTIVE_QUESTIONS = 8
+
+
+def _format_required_skills(job: Job | None) -> str:
+    if job is None or not job.skills:
+        return ""
+    return ", ".join(
+        f"{skill.name} ({skill.required_level})" if skill.required_level else skill.name
+        for skill in job.skills
+    )
+
 
 def create_session(db: Session, candidate: Candidate) -> InterviewSession:
     job = db.get(Job, candidate.job_id)
 
     cv_text = candidate.cvs[-1].parsed_text if candidate.cvs else ""
     job_description = job.description if job else ""
+    required_skills = _format_required_skills(job)
 
     session = InterviewSession(candidate_id=candidate.id, job_id=candidate.job_id, status="in_progress")
-    questions = get_ai_provider().generate_questions(cv_text, job_description)
+    questions = get_ai_provider().generate_questions(cv_text, job_description, required_skills, count=1)
     session.questions = [
-        InterviewQuestion(text=text, order=i) for i, text in enumerate(questions)
+        InterviewQuestion(
+            text=q["question"], category=q.get("category"), difficulty=q.get("difficulty"), order=i
+        )
+        for i, q in enumerate(questions)
     ]
 
     db.add(session)
     db.commit()
     db.refresh(session)
     return session
+
+
+def preview_questions(db: Session, candidate: Candidate, count: int = 5) -> list[dict]:
+    job = db.get(Job, candidate.job_id)
+    cv_text = candidate.cvs[-1].parsed_text if candidate.cvs else ""
+    job_description = job.description if job else ""
+    required_skills = _format_required_skills(job)
+    return get_ai_provider().generate_questions(cv_text, job_description, required_skills, count=count)
+
+
+def evaluate_answer(
+    db: Session, session_id: int, question_id: int, candidate_answer: str
+) -> tuple[AIEvaluation, InterviewQuestion | None]:
+    session = db.get(InterviewSession, session_id)
+    if session is None:
+        raise ValueError("Interview session not found")
+    question = db.get(InterviewQuestion, question_id)
+    if question is None or question.session_id != session_id:
+        raise ValueError("Question not found for this session")
+
+    candidate = db.get(Candidate, session.candidate_id)
+    job = db.get(Job, session.job_id)
+    cv_text = candidate.cvs[-1].parsed_text if candidate and candidate.cvs else ""
+    job_description = job.description if job else ""
+
+    answer = (
+        db.query(CandidateAnswer)
+        .filter(CandidateAnswer.session_id == session_id, CandidateAnswer.question_id == question_id)
+        .first()
+    )
+    if answer is None:
+        answer = CandidateAnswer(session_id=session_id, question_id=question_id, transcript=candidate_answer)
+        db.add(answer)
+    else:
+        answer.transcript = candidate_answer
+    db.commit()
+    db.refresh(answer)
+
+    result = get_ai_provider().evaluate_and_adapt(
+        job_description=job_description,
+        cv_text=cv_text,
+        previous_question=question.text,
+        candidate_answer=candidate_answer,
+    )
+
+    evaluation = db.query(AIEvaluation).filter(AIEvaluation.answer_id == answer.id).first()
+    if evaluation is None:
+        evaluation = AIEvaluation(answer_id=answer.id)
+        db.add(evaluation)
+    evaluation.competency = result["competency"]
+    evaluation.score = result["score"]
+    evaluation.is_sufficient = result["is_sufficient"]
+    evaluation.follow_up_needed = result["follow_up_needed"]
+
+    existing_count = db.query(InterviewQuestion).filter(InterviewQuestion.session_id == session_id).count()
+    next_question_text = result.get("next_question")
+    next_question = None
+    if next_question_text and existing_count < MAX_ADAPTIVE_QUESTIONS:
+        next_question = InterviewQuestion(
+            session_id=session_id,
+            text=next_question_text,
+            order=existing_count,
+            is_follow_up=result["follow_up_needed"],
+        )
+        db.add(next_question)
+
+    db.commit()
+    db.refresh(evaluation)
+    if next_question is not None:
+        db.refresh(next_question)
+
+    return evaluation, next_question
 
 
 def get_session(db: Session, session_id: int) -> InterviewSession | None:
@@ -57,6 +145,11 @@ def update_session_status(
 
 
 def delete_session(db: Session, session: InterviewSession) -> None:
+    answer_ids = [a.id for a in session.answers]
+    if answer_ids:
+        db.query(AIEvaluation).filter(AIEvaluation.answer_id.in_(answer_ids)).delete(
+            synchronize_session=False
+        )
     db.query(AIScore).filter(AIScore.session_id == session.id).delete()
     db.query(InterviewReport).filter(InterviewReport.session_id == session.id).delete()
     db.delete(session)
