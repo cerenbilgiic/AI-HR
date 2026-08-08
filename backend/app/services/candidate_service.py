@@ -4,6 +4,7 @@ from app.core.security import hash_password
 from app.models.candidate import Candidate, CandidateCV, CandidateSkill
 from app.models.consent import ConsentRecord
 from app.models.interview import InterviewSession
+from app.models.job import Job
 from app.schemas.candidate import (
     CandidateCreate,
     CandidateCVCreate,
@@ -13,6 +14,7 @@ from app.schemas.candidate import (
     CandidateUpdate,
     ConsentIn,
 )
+from app.services.ai import get_ai_provider
 
 
 def list_candidates(db: Session, job_id: int | None = None) -> list[Candidate]:
@@ -116,3 +118,12 @@ def update_candidate_cv(db: Session, cv: CandidateCV, data: CandidateCVUpdate) -
 def delete_candidate_cv(db: Session, cv: CandidateCV) -> None:
     db.delete(cv)
     db.commit()
+
+
+def analyze_candidate_cv(db: Session, candidate: Candidate, cv: CandidateCV) -> CandidateCV:
+    job = db.get(Job, candidate.job_id)
+    analysis = get_ai_provider().analyze_cv(cv.parsed_text or "", job.description if job else "")
+    cv.analysis = analysis
+    db.commit()
+    db.refresh(cv)
+    return cv

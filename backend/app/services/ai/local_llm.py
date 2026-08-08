@@ -52,5 +52,9 @@ class LocalOllamaProvider(AIProvider):
         )
         return json.loads(_strip_json_fence(self._chat(prompt)))
 
+    def analyze_cv(self, cv_text: str, job_description: str) -> dict:
+        prompt = prompts.CV_ANALYSIS_PROMPT.format(job_description=job_description, cv_text=cv_text)
+        return json.loads(_strip_json_fence(self._chat(prompt)))
+
     def transcribe(self, audio_path: str) -> str:
         return self._stt.transcribe(audio_path)

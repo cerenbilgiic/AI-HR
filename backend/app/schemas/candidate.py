@@ -56,6 +56,7 @@ class CandidateCVOut(BaseModel):
     candidate_id: int
     file_path: str
     parsed_text: str | None
+    analysis: dict | None = None
 
     model_config = {"from_attributes": True}
 

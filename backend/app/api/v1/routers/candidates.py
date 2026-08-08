@@ -1,9 +1,13 @@
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_current_candidate, get_current_user
 from app.core.database import get_db
 from app.models.candidate import Candidate
+from app.models.job import Job
 from app.models.user import User
 from app.schemas.candidate import (
     CandidateCreate,
@@ -19,6 +23,7 @@ from app.schemas.candidate import (
     ConsentOut,
 )
 from app.services import candidate_service
+from app.services.docx_report import build_cv_analysis_docx
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -176,3 +181,47 @@ def delete_candidate_cv(
     if cv is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
     candidate_service.delete_candidate_cv(db, cv)
+
+
+@router.post("/{candidate_id}/cvs/{cv_id}/analysis", response_model=CandidateCVOut)
+def analyze_candidate_cv(
+    candidate_id: int,
+    cv_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CandidateCVOut:
+    candidate = _get_candidate_or_404(db, candidate_id)
+    cv = candidate_service.get_candidate_cv(db, candidate_id, cv_id)
+    if cv is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+    return candidate_service.analyze_candidate_cv(db, candidate, cv)
+
+
+@router.get("/{candidate_id}/cvs/{cv_id}/analysis/docx")
+def download_candidate_cv_analysis(
+    candidate_id: int,
+    cv_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    candidate = _get_candidate_or_404(db, candidate_id)
+    cv = candidate_service.get_candidate_cv(db, candidate_id, cv_id)
+    if cv is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+    if not cv.analysis:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV has not been analyzed yet")
+
+    job = db.get(Job, candidate.job_id)
+    buffer = build_cv_analysis_docx(candidate, job, cv.analysis)
+    filename = f"{candidate.full_name.replace(' ', '_')}_cv_analysis.docx"
+    ascii_filename = filename.encode("ascii", "ignore").decode("ascii") or "cv_analysis.docx"
+    encoded_filename = quote(filename)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+            )
+        },
+    )

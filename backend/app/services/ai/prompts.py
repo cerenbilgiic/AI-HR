@@ -37,3 +37,16 @@ Write a short summary of the candidate's performance and a final hire
 recommendation (Recommend / Consider / Do Not Recommend) with justification.
 Respond as JSON with keys "summary" and "recommendation".
 """
+
+CV_ANALYSIS_PROMPT = """Job description:
+{job_description}
+
+Candidate CV:
+{cv_text}
+
+Analyze how well this CV fits the job description. Identify the candidate's
+strengths and weaknesses (gaps, missing skills or experience) relative to the
+role, and write a short overall summary of their fit.
+Respond as JSON with keys "strengths" (a list of short strings), "weaknesses"
+(a list of short strings), and "summary" (a one-paragraph string).
+"""

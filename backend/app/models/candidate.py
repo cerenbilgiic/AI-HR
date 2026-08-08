@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import JSON, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -40,5 +40,6 @@ class CandidateCV(Base, TimestampMixin):
     candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id"))
     file_path: Mapped[str] = mapped_column(String(500))
     parsed_text: Mapped[str] = mapped_column(String(10000), nullable=True)
+    analysis: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     candidate: Mapped["Candidate"] = relationship(back_populates="cvs")

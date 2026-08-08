@@ -26,5 +26,9 @@ class AIProvider(ABC):
         ...
 
     @abstractmethod
+    def analyze_cv(self, cv_text: str, job_description: str) -> dict:
+        ...
+
+    @abstractmethod
     def transcribe(self, audio_path: str) -> str:
         ...
