@@ -26,6 +26,8 @@ export interface InterviewQuestion {
   text: string
   order: number
   is_follow_up: boolean
+  category: string | null
+  difficulty: string | null
 }
 
 export interface InterviewSession {
@@ -34,6 +36,14 @@ export interface InterviewSession {
   job_id: number
   status: string
   questions: InterviewQuestion[]
+}
+
+export interface AIEvaluation {
+  competency: string | null
+  score: number | null
+  is_sufficient: boolean
+  follow_up_needed: boolean
+  next_question: InterviewQuestion | null
 }
 
 export interface AIScores {

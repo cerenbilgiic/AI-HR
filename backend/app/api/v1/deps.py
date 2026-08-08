@@ -50,3 +50,36 @@ def get_current_candidate(
     if candidate is None:
         raise credentials_error
     return candidate
+
+
+def get_current_user_or_candidate(
+    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+) -> User | Candidate:
+    """Accepts either an HR staff token or a candidate token.
+
+    For endpoints usable both by HR (testing/manual triggers) and by a
+    candidate acting on their own interview session — callers must still
+    verify a returned Candidate actually owns the resource being accessed.
+    """
+    credentials_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials"
+    )
+    try:
+        payload = decode_access_token(token)
+        subject_id = payload.get("sub")
+        token_type = payload.get("type")
+        if subject_id is None or token_type not in ("staff", "candidate"):
+            raise credentials_error
+    except JWTError:
+        raise credentials_error
+
+    if token_type == "staff":
+        user = db.get(User, int(subject_id))
+        if user is None:
+            raise credentials_error
+        return user
+
+    candidate = db.get(Candidate, int(subject_id))
+    if candidate is None:
+        raise credentials_error
+    return candidate

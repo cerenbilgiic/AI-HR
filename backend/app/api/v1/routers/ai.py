@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_current_user
+from app.api.v1.deps import get_current_user, get_current_user_or_candidate
 from app.core.database import get_db
+from app.models.candidate import Candidate
 from app.models.user import User
 from app.schemas.ai import (
     AIEvaluateAnswerRequest,
@@ -36,8 +37,14 @@ def generate_questions(
 def evaluate_answer(
     data: AIEvaluateAnswerRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current: User | Candidate = Depends(get_current_user_or_candidate),
 ) -> AIEvaluationOut:
+    if isinstance(current, Candidate):
+        session = interview_service.get_session(db, data.session_id)
+        if session is None or session.candidate_id != current.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this session"
+            )
     try:
         evaluation, next_question = interview_service.evaluate_answer(
             db, data.session_id, data.question_id, data.candidate_answer
