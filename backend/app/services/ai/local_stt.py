@@ -28,9 +28,12 @@ def _register_cuda_dll_dirs() -> None:
 
 
 class LocalWhisperSTT:
-    def __init__(self, model_size: str | None = None, device: str | None = None) -> None:
+    def __init__(
+        self, model_size: str | None = None, device: str | None = None, language: str | None = None
+    ) -> None:
         self._model_size = model_size or settings.whisper_model
         self._device = device or settings.whisper_device
+        self._language = language or settings.whisper_language
         self._model: WhisperModel | None = None
         if self._device == "cuda":
             _register_cuda_dll_dirs()
@@ -48,9 +51,14 @@ class LocalWhisperSTT:
         # condition_on_previous_text=False stops one hallucinated segment from
         # biasing the next — small Whisper models otherwise tend to loop on
         # repeated garbage (e.g. strings of numbers) when fed quiet/noisy audio.
+        # Pinning `language` also skips Whisper's own auto-detection, which was
+        # misidentifying Turkish answers as another language entirely.
         try:
             segments, _ = self._get_model().transcribe(
-                audio_path, vad_filter=True, condition_on_previous_text=False
+                audio_path,
+                language=self._language,
+                vad_filter=True,
+                condition_on_previous_text=False,
             )
             return " ".join(segment.text.strip() for segment in segments)
         except ValueError:

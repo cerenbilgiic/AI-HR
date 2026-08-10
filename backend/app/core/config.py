@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     whisper_model: str = "base"
     whisper_device: str = "cuda"
+    whisper_language: str = "tr"
 
     upload_dir: str = "uploads/audio"
 
