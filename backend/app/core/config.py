@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     whisper_model: str = "base"
     whisper_device: str = "cuda"
 
+    upload_dir: str = "uploads/audio"
+
     cors_origins: str = "http://localhost:5173"
 
     @property

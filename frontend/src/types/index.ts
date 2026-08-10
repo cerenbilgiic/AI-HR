@@ -46,6 +46,11 @@ export interface AIEvaluation {
   next_question: InterviewQuestion | null
 }
 
+export interface AITranscription {
+  transcript: string
+  audio_path: string
+}
+
 export interface AIScores {
   technical_competency: number | null
   communication_skills: number | null

@@ -34,3 +34,8 @@ class AIEvaluationOut(BaseModel):
     next_question: InterviewQuestionOut | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AITranscribeResponse(BaseModel):
+    transcript: str
+    audio_path: str
