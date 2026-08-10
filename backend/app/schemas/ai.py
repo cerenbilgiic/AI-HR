@@ -24,7 +24,6 @@ class AIEvaluateAnswerRequest(BaseModel):
     session_id: int
     question_id: int
     candidate_answer: str
-    audio_path: str | None = None
 
 
 class AIEvaluationOut(BaseModel):
@@ -32,6 +31,7 @@ class AIEvaluationOut(BaseModel):
     score: float | None
     is_sufficient: bool
     follow_up_needed: bool
+    feedback: str | None = None
     next_question: InterviewQuestionOut | None = None
 
     model_config = {"from_attributes": True}
@@ -39,4 +39,9 @@ class AIEvaluationOut(BaseModel):
 
 class AITranscribeResponse(BaseModel):
     transcript: str
-    audio_path: str
+    object_key: str
+
+
+class AIMediaUrlResponse(BaseModel):
+    url: str
+    expires_in_seconds: int

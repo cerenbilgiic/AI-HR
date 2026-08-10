@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import BigInteger, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -12,6 +12,14 @@ class InterviewSession(Base, TimestampMixin):
     candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id"))
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
     status: Mapped[str] = mapped_column(String(50), default="pending")
+
+    # One continuous recording for the whole interview (see
+    # POST /interviews/{id}/recording), replacing the earlier per-question
+    # recordings on CandidateAnswer for new interviews.
+    recording_path: Mapped[str] = mapped_column(String(500), nullable=True)
+    recording_filename: Mapped[str] = mapped_column(String(255), nullable=True)
+    recording_content_type: Mapped[str] = mapped_column(String(100), nullable=True)
+    recording_size: Mapped[int] = mapped_column(BigInteger, nullable=True)
 
     questions: Mapped[list["InterviewQuestion"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
@@ -43,7 +51,15 @@ class CandidateAnswer(Base, TimestampMixin):
     session_id: Mapped[int] = mapped_column(ForeignKey("interview_sessions.id"))
     question_id: Mapped[int] = mapped_column(ForeignKey("interview_questions.id"))
     transcript: Mapped[str] = mapped_column(Text, nullable=True)
+    # Holds a MinIO object key (e.g. "interviews/42/<uuid>.webm"), not a
+    # filesystem path, despite the name — kept as-is to avoid an unnecessary
+    # rename/migration; see media_filename/content_type/size below for the
+    # rest of the object's metadata.
     audio_path: Mapped[str] = mapped_column(String(500), nullable=True)
+    media_filename: Mapped[str] = mapped_column(String(255), nullable=True)
+    media_content_type: Mapped[str] = mapped_column(String(100), nullable=True)
+    media_size: Mapped[int] = mapped_column(BigInteger, nullable=True)
 
     session: Mapped["InterviewSession"] = relationship(back_populates="answers")
     question: Mapped["InterviewQuestion"] = relationship(back_populates="answer")
+    evaluation: Mapped["AIEvaluation"] = relationship(back_populates="answer", uselist=False)

@@ -13,8 +13,11 @@ from app.schemas.interview import (
 )
 from app.schemas.report import AIScoreUpdate, InterviewReportUpdate
 from app.services.ai import get_ai_provider
+from app.services.storage import MediaStorage
+from app.services.text_quality import validate_answer_text
 
 MAX_ADAPTIVE_QUESTIONS = 8
+DEFAULT_QUESTION_COUNT = 5
 
 
 def _format_required_skills(job: Job | None) -> str:
@@ -26,7 +29,11 @@ def _format_required_skills(job: Job | None) -> str:
     )
 
 
-def create_session(db: Session, candidate: Candidate) -> InterviewSession:
+def create_session(db: Session, candidate: Candidate, count: int = DEFAULT_QUESTION_COUNT) -> InterviewSession:
+    """Generates the full set of interview questions up front — the
+    candidate answers all of them and only gets evaluated at the end
+    (finalize_session), rather than per-turn (see evaluate_answer, which
+    is no longer called by this flow but is left in place)."""
     job = db.get(Job, candidate.job_id)
 
     cv_text = candidate.cvs[-1].parsed_text if candidate.cvs else ""
@@ -34,7 +41,7 @@ def create_session(db: Session, candidate: Candidate) -> InterviewSession:
     required_skills = _format_required_skills(job)
 
     session = InterviewSession(candidate_id=candidate.id, job_id=candidate.job_id, status="in_progress")
-    questions = get_ai_provider().generate_questions(cv_text, job_description, required_skills, count=1)
+    questions = get_ai_provider().generate_questions(cv_text, job_description, required_skills, count=count)
     session.questions = [
         InterviewQuestion(
             text=q["question"], category=q.get("category"), difficulty=q.get("difficulty"), order=i
@@ -70,42 +77,87 @@ def generate_and_persist_questions(
     return session
 
 
-def evaluate_answer(
-    db: Session,
-    session_id: int,
-    question_id: int,
-    candidate_answer: str,
-    audio_path: str | None = None,
-) -> tuple[AIEvaluation, InterviewQuestion | None]:
-    session = db.get(InterviewSession, session_id)
-    if session is None:
-        raise ValueError("Interview session not found")
-    question = db.get(InterviewQuestion, question_id)
-    if question is None or question.session_id != session_id:
-        raise ValueError("Question not found for this session")
-
-    candidate = db.get(Candidate, session.candidate_id)
-    job = db.get(Job, session.job_id)
-    cv_text = candidate.cvs[-1].parsed_text if candidate and candidate.cvs else ""
-    job_description = job.description if job else ""
-
+def _get_or_create_answer(db: Session, session_id: int, question_id: int) -> CandidateAnswer:
     answer = (
         db.query(CandidateAnswer)
         .filter(CandidateAnswer.session_id == session_id, CandidateAnswer.question_id == question_id)
         .first()
     )
     if answer is None:
-        answer = CandidateAnswer(
-            session_id=session_id,
-            question_id=question_id,
-            transcript=candidate_answer,
-            audio_path=audio_path,
-        )
+        answer = CandidateAnswer(session_id=session_id, question_id=question_id)
         db.add(answer)
-    else:
-        answer.transcript = candidate_answer
-        if audio_path is not None:
-            answer.audio_path = audio_path
+        db.flush()
+    return answer
+
+
+def _get_session_and_question(
+    db: Session, session_id: int, question_id: int
+) -> tuple[InterviewSession, InterviewQuestion]:
+    session = db.get(InterviewSession, session_id)
+    if session is None:
+        raise ValueError("Interview session not found")
+    question = db.get(InterviewQuestion, question_id)
+    if question is None or question.session_id != session_id:
+        raise ValueError("Question not found for this session")
+    return session, question
+
+
+def attach_media(
+    db: Session,
+    session_id: int,
+    question_id: int,
+    object_key: str,
+    filename: str,
+    content_type: str,
+    size: int,
+) -> CandidateAnswer:
+    """Persist a successfully-uploaded recording's object-storage metadata
+    onto its answer, creating the answer row if this is the first thing
+    recorded for that question (before any transcript/evaluation exists).
+    """
+    _get_session_and_question(db, session_id, question_id)
+    answer = _get_or_create_answer(db, session_id, question_id)
+    answer.audio_path = object_key
+    answer.media_filename = filename
+    answer.media_content_type = content_type
+    answer.media_size = size
+    db.commit()
+    db.refresh(answer)
+    return answer
+
+
+def attach_recording(
+    db: Session, session_id: int, object_key: str, filename: str, content_type: str, size: int
+) -> InterviewSession:
+    """Persist the whole-interview recording's object-storage metadata onto
+    its session — see POST /interviews/{id}/recording, called once at the
+    end of the interview (as opposed to attach_media, which is per-answer
+    and belongs to the now-superseded per-question recording flow).
+    """
+    session = db.get(InterviewSession, session_id)
+    if session is None:
+        raise ValueError("Interview session not found")
+    session.recording_path = object_key
+    session.recording_filename = filename
+    session.recording_content_type = content_type
+    session.recording_size = size
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def evaluate_answer(
+    db: Session, session_id: int, question_id: int, candidate_answer: str
+) -> tuple[AIEvaluation, InterviewQuestion | None]:
+    session, question = _get_session_and_question(db, session_id, question_id)
+
+    candidate = db.get(Candidate, session.candidate_id)
+    job = db.get(Job, session.job_id)
+    cv_text = candidate.cvs[-1].parsed_text if candidate and candidate.cvs else ""
+    job_description = job.description if job else ""
+
+    answer = _get_or_create_answer(db, session_id, question_id)
+    answer.transcript = candidate_answer
     db.commit()
     db.refresh(answer)
 
@@ -124,6 +176,7 @@ def evaluate_answer(
     evaluation.score = result["score"]
     evaluation.is_sufficient = result["is_sufficient"]
     evaluation.follow_up_needed = result["follow_up_needed"]
+    evaluation.feedback = result["feedback"]
 
     existing_count = db.query(InterviewQuestion).filter(InterviewQuestion.session_id == session_id).count()
     next_question_text = result.get("next_question")
@@ -160,6 +213,29 @@ def list_sessions(
     return query.all()
 
 
+def attach_report_summary(db: Session, sessions: list[InterviewSession]) -> None:
+    """Batch-attaches overall_score/recommendation from InterviewReport onto
+    each session as transient attributes (not mapped columns), so HR-facing
+    session responses can show a score without an N+1 report query per row.
+
+    Deliberately not folded into get_session/list_sessions themselves —
+    those are also called by finish/evaluate/generate-report/submit_answer,
+    where this extra query would be pure overhead.
+    """
+    if not sessions:
+        return
+    reports = {
+        report.session_id: report
+        for report in db.query(InterviewReport).filter(
+            InterviewReport.session_id.in_([s.id for s in sessions])
+        )
+    }
+    for session in sessions:
+        report = reports.get(session.id)
+        session.overall_score = report.overall_score if report else None
+        session.recommendation = report.recommendation if report else None
+
+
 def update_session_status(
     db: Session, session: InterviewSession, data: InterviewSessionStatusUpdate
 ) -> InterviewSession:
@@ -169,8 +245,20 @@ def update_session_status(
     return session
 
 
-def delete_session(db: Session, session: InterviewSession) -> None:
+def delete_session(db: Session, session: InterviewSession, storage: MediaStorage | None = None) -> None:
     answer_ids = [a.id for a in session.answers]
+    if storage is not None:
+        for answer in session.answers:
+            if answer.audio_path:
+                try:
+                    storage.delete(answer.audio_path)
+                except Exception:
+                    pass  # best-effort — don't block session deletion on a storage hiccup
+        if session.recording_path:
+            try:
+                storage.delete(session.recording_path)
+            except Exception:
+                pass
     if answer_ids:
         db.query(AIEvaluation).filter(AIEvaluation.answer_id.in_(answer_ids)).delete(
             synchronize_session=False
@@ -199,6 +287,14 @@ def get_question(db: Session, session_id: int, question_id: int) -> InterviewQue
     )
 
 
+def get_answer(db: Session, session_id: int, question_id: int) -> CandidateAnswer | None:
+    return (
+        db.query(CandidateAnswer)
+        .filter(CandidateAnswer.session_id == session_id, CandidateAnswer.question_id == question_id)
+        .first()
+    )
+
+
 def update_question(db: Session, question: InterviewQuestion, data: InterviewQuestionUpdate) -> InterviewQuestion:
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(question, field, value)
@@ -217,20 +313,42 @@ def submit_answer(db: Session, session_id: int, data: AnswerSubmit) -> Candidate
     if transcript is None and data.audio_path:
         transcript = get_ai_provider().transcribe(data.audio_path)
 
-    answer = CandidateAnswer(
-        session_id=session_id,
-        question_id=data.question_id,
-        transcript=transcript,
-        audio_path=data.audio_path,
-    )
-    db.add(answer)
+    # A forced timeout submission is never blocked — the candidate simply
+    # ran out of time, which isn't the same thing as submitting junk on
+    # purpose. A blank answer isn't gibberish either, it's just absent.
+    if transcript and transcript.strip() and not data.is_timeout:
+        validate_answer_text(transcript.strip())
+
+    # Reuses the existing row instead of inserting a new one: /ai/transcribe
+    # may have already created this (session_id, question_id) answer via
+    # attach_media() when the recording was made, before this call arrives.
+    answer = _get_or_create_answer(db, session_id, data.question_id)
+    answer.transcript = transcript
+    if data.audio_path:
+        answer.audio_path = data.audio_path
     db.commit()
     db.refresh(answer)
     return answer
 
 
+def complete_session(db: Session, session: InterviewSession) -> InterviewSession:
+    """Candidate-facing completion: just marks the interview as awaiting HR
+    review. No AI call — evaluation is now HR-triggered (see finalize_session,
+    called from the /evaluate endpoint once HR sees the session is ready).
+    """
+    session.status = "awaiting_review"
+    db.commit()
+    db.refresh(session)
+    return session
+
+
 def finalize_session(db: Session, session_id: int) -> InterviewReport:
     session = db.get(InterviewSession, session_id)
+    if session is None:
+        raise ValueError("Interview session not found")
+    if session.status == "in_progress":
+        raise ValueError("Candidate has not finished this interview yet")
+
     job = db.get(Job, session.job_id)
     provider = get_ai_provider()
 
@@ -245,15 +363,25 @@ def finalize_session(db: Session, session_id: int) -> InterviewReport:
     ]
     averaged = _average_scores(scores)
 
-    ai_score = AIScore(session_id=session_id, **averaged)
-    report = InterviewReport(
-        session_id=session_id,
-        summary=report_data.get("summary"),
-        recommendation=report_data.get("recommendation"),
-    )
+    # Upsert rather than always inserting — HR can re-trigger evaluation
+    # (e.g. a double-click, or intentionally regenerating the report), and
+    # this must not accumulate duplicate AIScore/InterviewReport rows.
+    ai_score = db.query(AIScore).filter(AIScore.session_id == session_id).first()
+    if ai_score is None:
+        ai_score = AIScore(session_id=session_id)
+        db.add(ai_score)
+    for field, value in averaged.items():
+        setattr(ai_score, field, value)
+
+    report = db.query(InterviewReport).filter(InterviewReport.session_id == session_id).first()
+    if report is None:
+        report = InterviewReport(session_id=session_id)
+        db.add(report)
+    report.summary = report_data.get("summary")
+    report.recommendation = report_data.get("recommendation")
+
     session.status = "completed"
 
-    db.add_all([ai_score, report])
     db.commit()
     db.refresh(report)
     return report

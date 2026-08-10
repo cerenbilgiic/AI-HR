@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Float, ForeignKey, String
+from sqlalchemy import Boolean, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -14,5 +14,6 @@ class AIEvaluation(Base, TimestampMixin):
     score: Mapped[float] = mapped_column(Float, nullable=True)
     is_sufficient: Mapped[bool] = mapped_column(Boolean, default=False)
     follow_up_needed: Mapped[bool] = mapped_column(Boolean, default=False)
+    feedback: Mapped[str] = mapped_column(Text, nullable=True)
 
-    answer: Mapped["CandidateAnswer"] = relationship()
+    answer: Mapped["CandidateAnswer"] = relationship(back_populates="evaluation")

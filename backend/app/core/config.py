@@ -17,7 +17,20 @@ class Settings(BaseSettings):
     whisper_device: str = "cuda"
     whisper_language: str = "tr"
 
-    upload_dir: str = "uploads/audio"
+    # MinIO settings kept for now (see storage/minio_storage.py) — the active
+    # backend is LocalFileStorage below, wired via get_media_storage().
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket_name: str = "ai-hr-media"
+    minio_secure: bool = False
+
+    local_media_dir: str = r"C:\HR-Recordings"
+
+    # KVKK-driven data retention windows (see app/services/data_retention.py).
+    media_retention_days: int = 7
+    transcript_retention_days: int = 30
+    report_retention_days: int = 90
 
     cors_origins: str = "http://localhost:5173"
 
