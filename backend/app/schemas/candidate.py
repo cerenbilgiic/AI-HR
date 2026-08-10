@@ -75,3 +75,11 @@ class ConsentOut(ConsentIn):
     candidate_id: int
 
     model_config = {"from_attributes": True}
+
+
+class CandidateDetailOut(CandidateOut):
+    """Used only by GET /candidates/{id} — the list endpoint stays on the
+    lean CandidateOut so it doesn't pull full CV text per row."""
+
+    cvs: list[CandidateCVOut] = []
+    skills: list[CandidateSkillOut] = []

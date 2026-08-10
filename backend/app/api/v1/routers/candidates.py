@@ -14,6 +14,7 @@ from app.schemas.candidate import (
     CandidateCVCreate,
     CandidateCVOut,
     CandidateCVUpdate,
+    CandidateDetailOut,
     CandidateOut,
     CandidateSkillIn,
     CandidateSkillOut,
@@ -42,12 +43,12 @@ def create_candidate(data: CandidateCreate, db: Session = Depends(get_db)) -> Ca
     return candidate_service.create_candidate(db, data)
 
 
-@router.get("/{candidate_id}", response_model=CandidateOut)
+@router.get("/{candidate_id}", response_model=CandidateDetailOut)
 def get_candidate(
     candidate_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> CandidateOut:
+) -> CandidateDetailOut:
     candidate = _get_candidate_or_404(db, candidate_id)
     return candidate
 

@@ -14,7 +14,7 @@ export default function Login() {
     try {
       const { data } = await apiClient.post('/auth/login', { email, password })
       localStorage.setItem('access_token', data.access_token)
-      navigate('/hr/jobs')
+      navigate('/hr/dashboard')
     } catch {
       setError('Invalid credentials')
     }
