@@ -1,6 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { candidateApiClient } from '../../api/client'
+import AIAvatar from '../../components/AIAvatar'
+import { useAIVoice } from '../../hooks/useAIVoice'
+
+const INTRO_TEXT =
+  'Mülakata başlamadan önce, Kişisel Verilerin Korunması Kanunu uyarınca onayınızı almamız ' +
+  'gerekiyor. Mülakat sırasında sesiniz ve görüntünüz kaydedilecek ve yapay zeka tarafından ' +
+  'işlenecektir. Lütfen aşağıdaki onay maddelerini dikkatlice okuyup kabul ediniz.'
 
 const CONSENT_ITEMS = [
   { key: 'camera_access', label: 'Kameraya erişim izni veriyorum.' },
@@ -31,6 +38,13 @@ export default function Consent() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const { speak, speaking, muted, setMuted } = useAIVoice()
+
+  useEffect(() => {
+    speak(INTRO_TEXT)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const allAccepted = Object.values(accepted).every(Boolean)
 
   async function handleContinue() {
@@ -49,9 +63,31 @@ export default function Consent() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h2 className="mb-4 text-xl font-semibold text-gray-900">Mülakat Öncesi Onay</h2>
+      <div className="mb-6 flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <AIAvatar speaking={speaking} />
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">Mülakat Öncesi Onay</h2>
+          <p className="mt-0.5 text-xs text-gray-500">Devam etmeden önce lütfen aşağıdakileri onaylayın.</p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => speak(INTRO_TEXT)}
+              className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              🔊 Tekrar dinle
+            </button>
+            <button
+              type="button"
+              onClick={() => setMuted((m) => !m)}
+              className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              {muted ? '🔇 Sesi aç' : '🔈 Sesi kapat'}
+            </button>
+          </div>
+        </div>
+      </div>
 
-      <div className="mb-6 max-h-72 overflow-y-auto rounded border border-gray-200 bg-white p-4 text-sm text-gray-700">
+      <div className="mb-6 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-700 shadow-sm">
         <h3 className="mb-2 font-semibold text-gray-900">
           Kişisel Verilerin Korunması Kanunu (KVKK) Aydınlatma Metni
         </h3>
@@ -95,12 +131,12 @@ export default function Consent() {
         </p>
       </div>
 
-      <div className="space-y-3 rounded border border-gray-200 bg-white p-4">
+      <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         {CONSENT_ITEMS.map((item) => (
           <label key={item.key} className="flex items-start gap-2 text-sm text-gray-900">
             <input
               type="checkbox"
-              className="mt-0.5"
+              className="mt-0.5 accent-indigo-600"
               checked={accepted[item.key]}
               onChange={(e) => setAccepted((prev) => ({ ...prev, [item.key]: e.target.checked }))}
             />
@@ -113,7 +149,7 @@ export default function Consent() {
       <button
         disabled={!allAccepted || submitting}
         onClick={handleContinue}
-        className="mt-6 w-full rounded bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-40"
+        className="mt-6 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 disabled:opacity-40"
       >
         {submitting ? 'Kaydediliyor…' : 'Kabul ediyorum, devam et'}
       </button>

@@ -21,6 +21,38 @@ export interface Candidate {
   job_id: number
 }
 
+export interface CandidateCV {
+  id: number
+  candidate_id: number
+  file_path: string
+  parsed_text: string | null
+  analysis: { strengths?: string[]; weaknesses?: string[]; summary?: string } | null
+}
+
+export interface CandidateSkillItem {
+  id: number
+  candidate_id: number
+  name: string
+}
+
+export interface CandidateDetail extends Candidate {
+  cvs: CandidateCV[]
+  skills: CandidateSkillItem[]
+}
+
+export interface AnswerEvaluation {
+  competency: string | null
+  score: number | null
+  feedback: string | null
+}
+
+export interface CandidateAnswer {
+  id: number
+  transcript: string | null
+  created_at: string
+  evaluation: AnswerEvaluation | null
+}
+
 export interface InterviewQuestion {
   id: number
   text: string
@@ -28,6 +60,7 @@ export interface InterviewQuestion {
   is_follow_up: boolean
   category: string | null
   difficulty: string | null
+  answer: CandidateAnswer | null
 }
 
 export interface InterviewSession {
@@ -35,6 +68,11 @@ export interface InterviewSession {
   candidate_id: number
   job_id: number
   status: string
+  created_at: string
+  updated_at: string
+  recording_path: string | null
+  overall_score: number | null
+  recommendation: string | null
   questions: InterviewQuestion[]
 }
 
@@ -43,12 +81,13 @@ export interface AIEvaluation {
   score: number | null
   is_sufficient: boolean
   follow_up_needed: boolean
+  feedback: string | null
   next_question: InterviewQuestion | null
 }
 
 export interface AITranscription {
   transcript: string
-  audio_path: string
+  object_key: string
 }
 
 export interface AIScores {
@@ -61,10 +100,29 @@ export interface AIScores {
   overall_score: number | null
 }
 
+export interface CompetencyScores {
+  communication: number
+  technical_competency: number
+  problem_solving: number
+  teamwork: number
+  customer_service: number
+  role_fit: number
+}
+
+export interface ReportEvidenceItem {
+  competency: string
+  evidence: string
+}
+
 export interface InterviewReport {
   id: number
   session_id: number
   summary: string | null
   recommendation: string | null
   scores: AIScores | null
+  overall_score: number | null
+  competency_scores: CompetencyScores | null
+  strengths: string[] | null
+  development_areas: string[] | null
+  evidence: ReportEvidenceItem[] | null
 }
