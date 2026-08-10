@@ -67,6 +67,7 @@ class ConsentIn(BaseModel):
     audio_recording: bool
     video_recording: bool
     ai_evaluation: bool
+    kvkk_consent: bool
 
 
 class ConsentOut(ConsentIn):

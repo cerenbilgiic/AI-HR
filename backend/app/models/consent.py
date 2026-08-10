@@ -15,5 +15,6 @@ class ConsentRecord(Base, TimestampMixin):
     audio_recording: Mapped[bool] = mapped_column(Boolean, default=False)
     video_recording: Mapped[bool] = mapped_column(Boolean, default=False)
     ai_evaluation: Mapped[bool] = mapped_column(Boolean, default=False)
+    kvkk_consent: Mapped[bool] = mapped_column(Boolean, default=False)
 
     candidate: Mapped["Candidate"] = relationship()
