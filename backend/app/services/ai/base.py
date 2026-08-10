@@ -38,6 +38,19 @@ class AIProvider(ABC):
         ...
 
     @abstractmethod
+    def generate_final_report(
+        self,
+        *,
+        job_description: str,
+        required_skills: str,
+        candidate_profile: str,
+        candidate_cv: str,
+        questions_and_answers: str,
+        answer_evaluations: str,
+    ) -> dict:
+        ...
+
+    @abstractmethod
     def analyze_cv(self, cv_text: str, job_description: str) -> dict:
         ...
 

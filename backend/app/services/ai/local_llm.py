@@ -120,11 +120,13 @@ class LocalOllamaProvider(AIProvider):
         score = _get_any(data, "cevap_puani", "cevap_puanı")
         is_sufficient = _get_any(data, "cevap_yeterli")
         follow_up_needed = _get_any(data, "takip_sorusu_gerekli")
+        feedback = data.get("geri_bildirim") or data.get("geribildirim")
         return {
             "competency": str(competency).strip()[:255],
             "score": score,
             "is_sufficient": bool(is_sufficient),
             "follow_up_needed": bool(follow_up_needed),
+            "feedback": str(feedback).strip() if feedback else None,
             "next_question": data.get("yeni_soru") or None,
         }
 
@@ -137,6 +139,26 @@ class LocalOllamaProvider(AIProvider):
     def generate_report(self, transcript: list[dict], job_description: str) -> dict:
         prompt = prompts.REPORT_GENERATION_PROMPT.format(
             job_description=job_description, transcript=json.dumps(transcript)
+        )
+        return _parse_json(self._chat(prompt))
+
+    def generate_final_report(
+        self,
+        *,
+        job_description: str,
+        required_skills: str,
+        candidate_profile: str,
+        candidate_cv: str,
+        questions_and_answers: str,
+        answer_evaluations: str,
+    ) -> dict:
+        prompt = prompts.FINAL_REPORT_PROMPT.format(
+            job_description=job_description,
+            required_skills=required_skills,
+            candidate_profile=candidate_profile,
+            candidate_cv=candidate_cv,
+            questions_and_answers=questions_and_answers,
+            answer_evaluations=answer_evaluations,
         )
         return _parse_json(self._chat(prompt))
 

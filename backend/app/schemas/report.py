@@ -1,4 +1,36 @@
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+RecommendationEnum = Literal["recommended", "maybe", "not_recommended"]
+
+
+class CompetencyScores(BaseModel):
+    communication: int = Field(ge=0, le=100)
+    technical_competency: int = Field(ge=0, le=100)
+    problem_solving: int = Field(ge=0, le=100)
+    teamwork: int = Field(ge=0, le=100)
+    customer_service: int = Field(ge=0, le=100)
+    role_fit: int = Field(ge=0, le=100)
+
+
+class EvidenceItem(BaseModel):
+    competency: str
+    evidence: str
+
+
+class FinalReportLLMResponse(BaseModel):
+    """Validates the raw dict returned by AIProvider.generate_final_report
+    before anything is written to MySQL — see app/services/report_service.py.
+    """
+
+    overall_score: int = Field(ge=0, le=100)
+    recommendation: RecommendationEnum
+    competency_scores: CompetencyScores
+    strengths: list[str]
+    development_areas: list[str]
+    summary: str
+    evidence: list[EvidenceItem]
 
 
 class AIScoreOut(BaseModel):
@@ -29,6 +61,13 @@ class InterviewReportOut(BaseModel):
     summary: str | None
     recommendation: str | None
     scores: AIScoreOut | None = None
+    # Populated only by the final report generator (report_service.py) —
+    # None for reports created by the older, lighter /evaluate flow.
+    overall_score: int | None = None
+    competency_scores: CompetencyScores | None = None
+    strengths: list[str] | None = None
+    development_areas: list[str] | None = None
+    evidence: list[EvidenceItem] | None = None
 
     model_config = {"from_attributes": True}
 
