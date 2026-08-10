@@ -10,11 +10,13 @@ class AIQuestionItem(BaseModel):
 
 
 class AIGenerateQuestionsRequest(BaseModel):
+    job_id: int
     candidate_id: int
-    count: int = 5
+    number_of_questions: int = 5
 
 
 class AIGenerateQuestionsResponse(BaseModel):
+    session_id: int
     questions: list[AIQuestionItem]
 
 

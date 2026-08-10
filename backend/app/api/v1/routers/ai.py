@@ -10,8 +10,9 @@ from app.schemas.ai import (
     AIEvaluationOut,
     AIGenerateQuestionsRequest,
     AIGenerateQuestionsResponse,
+    AIQuestionItem,
 )
-from app.services import candidate_service, interview_service
+from app.services import candidate_service, interview_service, job_service
 from app.services.ai.base import AIResponseError
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -26,11 +27,24 @@ def generate_questions(
     candidate = candidate_service.get_candidate(db, data.candidate_id)
     if candidate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    job = job_service.get_job(db, data.job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     try:
-        questions = interview_service.preview_questions(db, candidate, count=data.count)
+        session = interview_service.generate_and_persist_questions(
+            db, candidate, job, count=data.number_of_questions
+        )
     except AIResponseError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    return AIGenerateQuestionsResponse(questions=questions)
+    return AIGenerateQuestionsResponse(
+        session_id=session.id,
+        questions=[
+            AIQuestionItem(
+                question=q.text, category=q.category or "general", difficulty=q.difficulty or "medium"
+            )
+            for q in session.questions
+        ],
+    )
 
 
 @router.post("/evaluate-answer", response_model=AIEvaluationOut)

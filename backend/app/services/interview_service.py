@@ -48,12 +48,26 @@ def create_session(db: Session, candidate: Candidate) -> InterviewSession:
     return session
 
 
-def preview_questions(db: Session, candidate: Candidate, count: int = 5) -> list[dict]:
-    job = db.get(Job, candidate.job_id)
+def generate_and_persist_questions(
+    db: Session, candidate: Candidate, job: Job, count: int = 5
+) -> InterviewSession:
     cv_text = candidate.cvs[-1].parsed_text if candidate.cvs else ""
     job_description = job.description if job else ""
     required_skills = _format_required_skills(job)
-    return get_ai_provider().generate_questions(cv_text, job_description, required_skills, count=count)
+
+    session = InterviewSession(candidate_id=candidate.id, job_id=job.id, status="pending")
+    questions = get_ai_provider().generate_questions(cv_text, job_description, required_skills, count=count)
+    session.questions = [
+        InterviewQuestion(
+            text=q["question"], category=q.get("category"), difficulty=q.get("difficulty"), order=i
+        )
+        for i, q in enumerate(questions)
+    ]
+
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
 
 
 def evaluate_answer(
