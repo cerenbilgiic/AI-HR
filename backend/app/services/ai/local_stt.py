@@ -44,5 +44,17 @@ class LocalWhisperSTT:
         return self._model
 
     def transcribe(self, audio_path: str) -> str:
-        segments, _ = self._get_model().transcribe(audio_path)
-        return " ".join(segment.text.strip() for segment in segments)
+        # vad_filter drops silence/non-speech before it reaches the model, and
+        # condition_on_previous_text=False stops one hallucinated segment from
+        # biasing the next — small Whisper models otherwise tend to loop on
+        # repeated garbage (e.g. strings of numbers) when fed quiet/noisy audio.
+        try:
+            segments, _ = self._get_model().transcribe(
+                audio_path, vad_filter=True, condition_on_previous_text=False
+            )
+            return " ".join(segment.text.strip() for segment in segments)
+        except ValueError:
+            # VAD found no speech at all in the audio (e.g. silence-only
+            # recording) — faster-whisper's language-detection step throws
+            # rather than returning an empty result in that case.
+            return ""

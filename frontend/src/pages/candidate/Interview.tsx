@@ -61,7 +61,11 @@ export default function Interview() {
       formData.append('session_id', String(session.id))
       formData.append('audio', blob, 'answer.webm')
       const { data } = await candidateApiClient.post<AITranscription>('/ai/transcribe', formData)
-      setAnswer(data.transcript)
+      if (data.transcript.trim()) {
+        setAnswer(data.transcript)
+      } else {
+        setError('No speech was detected in that recording. Please try again.')
+      }
     } catch {
       setError('Could not transcribe your recording. Please try again or type your answer.')
     } finally {
