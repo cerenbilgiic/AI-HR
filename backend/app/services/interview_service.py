@@ -71,7 +71,11 @@ def generate_and_persist_questions(
 
 
 def evaluate_answer(
-    db: Session, session_id: int, question_id: int, candidate_answer: str
+    db: Session,
+    session_id: int,
+    question_id: int,
+    candidate_answer: str,
+    audio_path: str | None = None,
 ) -> tuple[AIEvaluation, InterviewQuestion | None]:
     session = db.get(InterviewSession, session_id)
     if session is None:
@@ -91,10 +95,17 @@ def evaluate_answer(
         .first()
     )
     if answer is None:
-        answer = CandidateAnswer(session_id=session_id, question_id=question_id, transcript=candidate_answer)
+        answer = CandidateAnswer(
+            session_id=session_id,
+            question_id=question_id,
+            transcript=candidate_answer,
+            audio_path=audio_path,
+        )
         db.add(answer)
     else:
         answer.transcript = candidate_answer
+        if audio_path is not None:
+            answer.audio_path = audio_path
     db.commit()
     db.refresh(answer)
 

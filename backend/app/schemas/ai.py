@@ -24,6 +24,7 @@ class AIEvaluateAnswerRequest(BaseModel):
     session_id: int
     question_id: int
     candidate_answer: str
+    audio_path: str | None = None
 
 
 class AIEvaluationOut(BaseModel):

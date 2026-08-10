@@ -67,7 +67,7 @@ def evaluate_answer(
             )
     try:
         evaluation, next_question = interview_service.evaluate_answer(
-            db, data.session_id, data.question_id, data.candidate_answer
+            db, data.session_id, data.question_id, data.candidate_answer, data.audio_path
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

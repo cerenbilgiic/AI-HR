@@ -62,6 +62,11 @@ class LocalOllamaProvider(AIProvider):
         response = self._client.chat(
             model=self._model,
             messages=[{"role": "user", "content": prompt}],
+            # Ollama unloads a model from memory 5 minutes after its last use by
+            # default, and reloading it adds ~15-20s to the next request. Keep it
+            # resident longer so a candidate idling between questions/answers
+            # doesn't pay that cold-start cost again mid-interview.
+            keep_alive="30m",
         )
         return response["message"]["content"]
 
