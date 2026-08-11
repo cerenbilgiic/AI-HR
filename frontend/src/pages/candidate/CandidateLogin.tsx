@@ -14,7 +14,7 @@ export default function CandidateLogin() {
     try {
       const { data } = await candidateApiClient.post('/auth/candidate-login', { email, password })
       localStorage.setItem('candidate_access_token', data.access_token)
-      navigate(`/interview/${data.candidate_id}/consent`)
+      navigate(`/interview/${data.candidate_id}/home`)
     } catch {
       setError('Invalid credentials')
     }

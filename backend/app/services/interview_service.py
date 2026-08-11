@@ -17,7 +17,6 @@ from app.services.storage import MediaStorage
 from app.services.text_quality import validate_answer_text
 
 MAX_ADAPTIVE_QUESTIONS = 8
-DEFAULT_QUESTION_COUNT = 5
 
 
 def _format_required_skills(job: Job | None) -> str:
@@ -29,24 +28,30 @@ def _format_required_skills(job: Job | None) -> str:
     )
 
 
-def create_session(db: Session, candidate: Candidate, count: int = DEFAULT_QUESTION_COUNT) -> InterviewSession:
-    """Generates the full set of interview questions up front — the
-    candidate answers all of them and only gets evaluated at the end
-    (finalize_session), rather than per-turn (see evaluate_answer, which
-    is no longer called by this flow but is left in place)."""
-    job = db.get(Job, candidate.job_id)
+def create_session(db: Session, candidate: Candidate) -> InterviewSession:
+    """Copies the job's HR-authored questions (JobQuestion, managed via
+    /jobs/{id}/questions) into a new session, in order — every candidate for
+    a job is asked the same fixed set. No AI call: question authorship is
+    entirely HR's, not generated (see generate_questions/QUESTION_GENERATION_PROMPT,
+    left in place but no longer called by this flow)."""
+    already_terminated = (
+        db.query(InterviewSession)
+        .filter(InterviewSession.candidate_id == candidate.id, InterviewSession.status == "terminated")
+        .first()
+    )
+    if already_terminated is not None:
+        raise ValueError(
+            "Your interview was terminated for leaving the interview screen and cannot be restarted"
+        )
 
-    cv_text = candidate.cvs[-1].parsed_text if candidate.cvs else ""
-    job_description = job.description if job else ""
-    required_skills = _format_required_skills(job)
+    job = db.get(Job, candidate.job_id)
+    if not job or not job.questions:
+        raise ValueError("This job has no interview questions configured yet")
 
     session = InterviewSession(candidate_id=candidate.id, job_id=candidate.job_id, status="in_progress")
-    questions = get_ai_provider().generate_questions(cv_text, job_description, required_skills, count=count)
     session.questions = [
-        InterviewQuestion(
-            text=q["question"], category=q.get("category"), difficulty=q.get("difficulty"), order=i
-        )
-        for i, q in enumerate(questions)
+        InterviewQuestion(text=q.text, order=q.order)
+        for q in sorted(job.questions, key=lambda q: q.order)
     ]
 
     db.add(session)
@@ -236,6 +241,24 @@ def attach_report_summary(db: Session, sessions: list[InterviewSession]) -> None
         session.recommendation = report.recommendation if report else None
 
 
+def attach_completion_stats(db: Session, sessions: list[InterviewSession]) -> None:
+    """Transient duration_minutes/answered_count for the candidate's
+    'completed interviews' list — derived from CandidateAnswer timestamps
+    rather than InterviewSession.updated_at, which gets bumped again by a
+    later HR evaluation (finalize_session/generate_final_report both write
+    session.status) and would no longer reflect when the candidate actually
+    finished. Not folded into get_session/list_sessions, same N+1-avoidance
+    reason as attach_report_summary.
+    """
+    for session in sessions:
+        session.answered_count = len([a for a in session.answers if a.transcript])
+        if session.answers:
+            last = max(a.created_at for a in session.answers)
+            session.duration_minutes = max(round((last - session.created_at).total_seconds() / 60), 0)
+        else:
+            session.duration_minutes = None
+
+
 def update_session_status(
     db: Session, session: InterviewSession, data: InterviewSessionStatusUpdate
 ) -> InterviewSession:
@@ -309,6 +332,12 @@ def delete_question(db: Session, question: InterviewQuestion) -> None:
 
 
 def submit_answer(db: Session, session_id: int, data: AnswerSubmit) -> CandidateAnswer:
+    session = db.get(InterviewSession, session_id)
+    if session is None:
+        raise ValueError("Interview session not found")
+    if session.status != "in_progress":
+        raise ValueError("This interview is no longer active")
+
     transcript = data.transcript
     if transcript is None and data.audio_path:
         transcript = get_ai_provider().transcribe(data.audio_path)
@@ -326,6 +355,8 @@ def submit_answer(db: Session, session_id: int, data: AnswerSubmit) -> Candidate
     answer.transcript = transcript
     if data.audio_path:
         answer.audio_path = data.audio_path
+    answer.recording_start_offset_seconds = data.recording_start_offset_seconds
+    answer.recording_end_offset_seconds = data.recording_end_offset_seconds
     db.commit()
     db.refresh(answer)
     return answer
@@ -336,7 +367,24 @@ def complete_session(db: Session, session: InterviewSession) -> InterviewSession
     review. No AI call — evaluation is now HR-triggered (see finalize_session,
     called from the /evaluate endpoint once HR sees the session is ready).
     """
+    if session.status != "in_progress":
+        raise ValueError("This interview is no longer active")
     session.status = "awaiting_review"
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def terminate_session(db: Session, session: InterviewSession) -> InterviewSession:
+    """The candidate switched tabs/apps a second time after being warned once
+    (see frontend Interview.tsx's leave-tracking) — end the interview
+    immediately as a distinct terminal state. Unlike complete_session, this
+    is not a normal finish: create_session refuses new attempts once a
+    candidate has a terminated session, so this is final.
+    """
+    if session.status != "in_progress":
+        raise ValueError("Only an in-progress interview can be terminated")
+    session.status = "terminated"
     db.commit()
     db.refresh(session)
     return session

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -16,12 +18,23 @@ class CandidateUpdate(BaseModel):
     job_id: int | None = None
 
 
+class CandidateSelfUpdate(BaseModel):
+    """Candidate-only self-service profile edit — see PUT /candidates/me.
+    Deliberately narrower than CandidateUpdate: no email (their login
+    credential) or job_id (HR-managed), just the safe display fields.
+    """
+
+    full_name: str | None = None
+    phone: str | None = None
+
+
 class CandidateOut(BaseModel):
     id: int
     full_name: str
     email: EmailStr
     phone: str | None
     job_id: int
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -78,8 +91,12 @@ class ConsentOut(ConsentIn):
 
 
 class CandidateDetailOut(CandidateOut):
-    """Used only by GET /candidates/{id} — the list endpoint stays on the
-    lean CandidateOut so it doesn't pull full CV text per row."""
+    """Used only by GET /candidates/{id} and GET /candidates/me — the list
+    endpoint stays on the lean CandidateOut so it doesn't pull full CV text
+    per row."""
 
     cvs: list[CandidateCVOut] = []
     skills: list[CandidateSkillOut] = []
+    # Attached by the router before serialization (transient, not a mapped
+    # column) — see candidate_service.compute_interview_deadline.
+    interview_deadline: datetime | None = None

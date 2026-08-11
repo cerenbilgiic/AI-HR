@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta
+
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import hash_password
 from app.models.candidate import Candidate, CandidateCV, CandidateSkill
 from app.models.consent import ConsentRecord
@@ -26,6 +29,11 @@ def list_candidates(db: Session, job_id: int | None = None) -> list[Candidate]:
 
 def get_candidate(db: Session, candidate_id: int) -> Candidate | None:
     return db.get(Candidate, candidate_id)
+
+
+def compute_interview_deadline(candidate: Candidate) -> datetime:
+    """Automatic, not HR-set — N days from account creation (settings.interview_deadline_days)."""
+    return candidate.created_at + timedelta(days=settings.interview_deadline_days)
 
 
 def create_candidate(db: Session, data: CandidateCreate) -> Candidate:

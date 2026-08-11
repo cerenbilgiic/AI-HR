@@ -2,7 +2,7 @@ import io
 import os
 import tempfile
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -23,6 +23,7 @@ from app.schemas.interview import (
 from app.schemas.ai import AIMediaUrlResponse
 from app.schemas.report import InterviewReportOut
 from app.services import interview_service, report_service
+from app.services.transcription_service import transcribe_pending_answers
 from app.services.ai.base import AIResponseError
 from app.services.media_constraints import ALLOWED_MEDIA_TYPES, MAX_MEDIA_SIZE_BYTES
 from app.services.storage import MediaStorage, get_media_storage
@@ -55,8 +56,8 @@ def create_session(
 ) -> InterviewSessionOut:
     try:
         return interview_service.create_session(db, current_candidate)
-    except AIResponseError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[InterviewSessionOut])
@@ -64,10 +65,17 @@ def list_sessions(
     candidate_id: int | None = None,
     job_id: int | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current: User | Candidate = Depends(get_current_user_or_candidate),
 ) -> list[InterviewSessionOut]:
+    """HR can list any sessions (optionally filtered). A candidate can only
+    ever list their own — candidate_id is overridden to their own id
+    regardless of what was passed, see pages/candidate/CandidateHome.tsx.
+    """
+    if isinstance(current, Candidate):
+        candidate_id = current.id
     sessions = interview_service.list_sessions(db, candidate_id=candidate_id, job_id=job_id)
     interview_service.attach_report_summary(db, sessions)
+    interview_service.attach_completion_stats(db, sessions)
     return sessions
 
 
@@ -85,6 +93,7 @@ def get_session(
     if isinstance(current, Candidate) and session.candidate_id != current.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this session")
     interview_service.attach_report_summary(db, [session])
+    interview_service.attach_completion_stats(db, [session])
     return session
 
 
@@ -176,15 +185,44 @@ def upload_recording(
 @router.post("/{session_id}/finish", response_model=InterviewSessionOut)
 def finish_session(
     session_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_candidate: Candidate = Depends(get_current_candidate),
 ) -> InterviewSessionOut:
     """Candidate-facing: just marks the interview as awaiting HR review.
     No AI evaluation happens here — see evaluate_session below, which HR
     triggers manually once they see the candidate has finished.
+
+    Schedules post-interview transcription of any verbal-only answers as a
+    background task — it runs after this response is already sent, so it
+    adds zero latency to what the candidate experiences (see
+    app/services/transcription_service.py for why this can't run live).
     """
     session = _get_owned_session(db, session_id, current_candidate)
-    return interview_service.complete_session(db, session)
+    try:
+        result = interview_service.complete_session(db, session)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    background_tasks.add_task(transcribe_pending_answers, session_id)
+    return result
+
+
+@router.post("/{session_id}/terminate", response_model=InterviewSessionOut)
+def terminate_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_candidate: Candidate = Depends(get_current_candidate),
+) -> InterviewSessionOut:
+    """Candidate left the interview tab/window a second time after being
+    warned once — end it immediately and permanently. See
+    interview_service.terminate_session and create_session's guard against
+    restarting after a termination.
+    """
+    session = _get_owned_session(db, session_id, current_candidate)
+    try:
+        return interview_service.terminate_session(db, session)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.post("/{session_id}/evaluate", response_model=InterviewReportOut)

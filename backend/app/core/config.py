@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     transcript_retention_days: int = 30
     report_retention_days: int = 90
 
+    # Days from account creation a candidate has to complete their
+    # interview — automatic, not HR-set (see candidate_service.compute_interview_deadline).
+    interview_deadline_days: int = 7
+
     cors_origins: str = "http://localhost:5173"
 
     @property

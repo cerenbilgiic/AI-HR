@@ -17,12 +17,29 @@ class JobSkillUpdate(BaseModel):
     required_level: str | None = None
 
 
+class JobQuestionIn(BaseModel):
+    text: str
+    order: int = 0
+
+
+class JobQuestionOut(JobQuestionIn):
+    id: int
+
+    model_config = {"from_attributes": True}
+
+
+class JobQuestionUpdate(BaseModel):
+    text: str | None = None
+    order: int | None = None
+
+
 class JobCreate(BaseModel):
     title: str
     description: str
     department: str | None = None
     location: str | None = None
     skills: list[JobSkillIn] = []
+    questions: list[JobQuestionIn] = []
 
 
 class JobUpdate(BaseModel):
@@ -39,5 +56,6 @@ class JobOut(BaseModel):
     department: str | None
     location: str | None
     skills: list[JobSkillOut] = []
+    questions: list[JobQuestionOut] = []
 
     model_config = {"from_attributes": True}

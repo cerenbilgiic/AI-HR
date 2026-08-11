@@ -4,6 +4,12 @@ export interface JobSkill {
   required_level: string | null
 }
 
+export interface JobQuestionItem {
+  id: number
+  text: string
+  order: number
+}
+
 export interface Job {
   id: number
   title: string
@@ -11,6 +17,7 @@ export interface Job {
   department: string | null
   location: string | null
   skills: JobSkill[]
+  questions: JobQuestionItem[]
 }
 
 export interface Candidate {
@@ -19,6 +26,7 @@ export interface Candidate {
   email: string
   phone: string | null
   job_id: number
+  created_at: string
 }
 
 export interface CandidateCV {
@@ -38,6 +46,7 @@ export interface CandidateSkillItem {
 export interface CandidateDetail extends Candidate {
   cvs: CandidateCV[]
   skills: CandidateSkillItem[]
+  interview_deadline: string | null
 }
 
 export interface AnswerEvaluation {
@@ -51,6 +60,7 @@ export interface CandidateAnswer {
   transcript: string | null
   created_at: string
   evaluation: AnswerEvaluation | null
+  recording_start_offset_seconds: number | null
 }
 
 export interface InterviewQuestion {
@@ -73,6 +83,8 @@ export interface InterviewSession {
   recording_path: string | null
   overall_score: number | null
   recommendation: string | null
+  duration_minutes: number | null
+  answered_count: number | null
   questions: InterviewQuestion[]
 }
 

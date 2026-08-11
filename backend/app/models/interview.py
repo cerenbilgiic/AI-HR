@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, ForeignKey, String, Text
+from sqlalchemy import BigInteger, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -59,6 +59,13 @@ class CandidateAnswer(Base, TimestampMixin):
     media_filename: Mapped[str] = mapped_column(String(255), nullable=True)
     media_content_type: Mapped[str] = mapped_column(String(100), nullable=True)
     media_size: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    # Seconds into InterviewSession.recording_path where this answer's
+    # verbal response starts/ends — set by the candidate frontend, used by
+    # transcription_service.transcribe_pending_answers (post-interview, see
+    # that module) to slice out just this answer's audio for STT. Not used
+    # at all if the candidate typed an answer (transcript already non-blank).
+    recording_start_offset_seconds: Mapped[float] = mapped_column(Float, nullable=True)
+    recording_end_offset_seconds: Mapped[float] = mapped_column(Float, nullable=True)
 
     session: Mapped["InterviewSession"] = relationship(back_populates="answers")
     question: Mapped["InterviewQuestion"] = relationship(back_populates="answer")

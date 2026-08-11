@@ -28,6 +28,16 @@ def create_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@router.get("/me", response_model=UserOut)
+def get_my_profile(current_user: User = Depends(get_current_user)) -> UserOut:
+    """HR-only self-service profile fetch — see pages/hr/Layout.tsx (sidebar
+    name/avatar) and pages/hr/Profile.tsx. Must stay registered before
+    /{user_id} below, or FastAPI tries to parse "me" as an int (same
+    ordering rule as GET /candidates/me).
+    """
+    return current_user
+
+
 @router.get("/{user_id}", response_model=UserOut)
 def get_user(
     user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)

@@ -4,7 +4,17 @@ from sqlalchemy.orm import Session
 from app.api.v1.deps import get_current_user
 from app.core.database import get_db
 from app.models.user import User
-from app.schemas.job import JobCreate, JobOut, JobSkillIn, JobSkillOut, JobSkillUpdate, JobUpdate
+from app.schemas.job import (
+    JobCreate,
+    JobOut,
+    JobQuestionIn,
+    JobQuestionOut,
+    JobQuestionUpdate,
+    JobSkillIn,
+    JobSkillOut,
+    JobSkillUpdate,
+    JobUpdate,
+)
 from app.services import job_service
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -97,3 +107,41 @@ def delete_job_skill(
     if skill is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
     job_service.delete_job_skill(db, skill)
+
+
+@router.post("/{job_id}/questions", response_model=JobQuestionOut, status_code=status.HTTP_201_CREATED)
+def add_job_question(
+    job_id: int,
+    data: JobQuestionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> JobQuestionOut:
+    job = _get_job_or_404(db, job_id)
+    return job_service.add_job_question(db, job, data)
+
+
+@router.put("/{job_id}/questions/{question_id}", response_model=JobQuestionOut)
+def update_job_question(
+    job_id: int,
+    question_id: int,
+    data: JobQuestionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> JobQuestionOut:
+    question = job_service.get_job_question(db, job_id, question_id)
+    if question is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+    return job_service.update_job_question(db, question, data)
+
+
+@router.delete("/{job_id}/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_job_question(
+    job_id: int,
+    question_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    question = job_service.get_job_question(db, job_id, question_id)
+    if question is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+    job_service.delete_job_question(db, question)

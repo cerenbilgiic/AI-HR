@@ -1,29 +1,37 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.models.ai_score import AIScore, InterviewReport
 from app.models.interview import CandidateAnswer
+from app.models.job import JobQuestion
 from app.schemas.interview import AnswerSubmit
 from app.services import interview_service
 
 
-def _fake_questions(n):
-    return [
-        {"question": f"Question {i}?", "category": "general", "difficulty": "medium"} for i in range(n)
-    ]
-
-
-def test_create_session_generates_all_questions_up_front(db_session, candidate, mocker):
-    fake_provider = MagicMock()
-    fake_provider.generate_questions.return_value = _fake_questions(5)
-    mocker.patch("app.services.interview_service.get_ai_provider", return_value=fake_provider)
+def test_create_session_copies_job_questions_in_order(db_session, candidate, job):
+    # Seeded jobs already have their own real HR-authored questions — clear
+    # them so this test only sees the two it's adding itself.
+    db_session.query(JobQuestion).filter(JobQuestion.job_id == job.id).delete()
+    db_session.add_all(
+        [
+            JobQuestion(job_id=job.id, text="Second question?", order=1),
+            JobQuestion(job_id=job.id, text="First question?", order=0),
+        ]
+    )
+    db_session.commit()
 
     session = interview_service.create_session(db_session, candidate)
 
-    assert len(session.questions) == 5
-    assert [q.order for q in session.questions] == [0, 1, 2, 3, 4]
-    assert [q.text for q in session.questions] == [f"Question {i}?" for i in range(5)]
-    # exactly one AI call for the whole interview, not one per question
-    fake_provider.generate_questions.assert_called_once()
+    assert [q.text for q in session.questions] == ["First question?", "Second question?"]
+    assert [q.order for q in session.questions] == [0, 1]
+
+
+def test_create_session_raises_when_job_has_no_questions(db_session, candidate, job):
+    db_session.query(JobQuestion).filter(JobQuestion.job_id == job.id).delete()
+    db_session.commit()
+    with pytest.raises(ValueError):
+        interview_service.create_session(db_session, candidate)
 
 
 def test_submit_answer_creates_row_when_none_exists(db_session, interview_session, question):

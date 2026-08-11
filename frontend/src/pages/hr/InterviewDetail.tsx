@@ -1,20 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import apiClient from '../../api/client'
+import HrStatusBadge from '../../components/HrStatusBadge'
+import RecommendationBadge from '../../components/RecommendationBadge'
 import type { Candidate, InterviewReport, InterviewSession, Job } from '../../types'
-
-const STATUS_LABELS: Record<string, string> = {
-  in_progress: 'In progress',
-  awaiting_review: 'Awaiting review',
-  completed: 'Completed',
-  pending: 'Pending',
-}
-
-const RECOMMENDATION_STYLES: Record<string, string> = {
-  recommended: 'bg-green-100 text-green-800',
-  maybe: 'bg-yellow-100 text-yellow-800',
-  not_recommended: 'bg-red-100 text-red-800',
-}
 
 const COMPETENCY_LABELS: Record<string, string> = {
   communication: 'Communication',
@@ -39,13 +28,12 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
   )
 }
 
-function RecommendationBadge({ recommendation }: { recommendation: string }) {
-  const style = RECOMMENDATION_STYLES[recommendation] ?? 'bg-gray-100 text-gray-800'
-  return (
-    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${style}`}>
-      {recommendation.replaceAll('_', ' ')}
-    </span>
-  )
+function answerText(answer: { transcript: string | null; recording_start_offset_seconds: number | null } | null): string {
+  if (answer?.transcript) return answer.transcript
+  if (answer?.recording_start_offset_seconds != null) {
+    return 'Sesli yanıt verildi ancak transkript oluşturulamadı.'
+  }
+  return 'Bu soru boş bırakıldı.'
 }
 
 // The recording-url endpoint returns an already-/api/v1-prefixed path (see
@@ -65,6 +53,8 @@ export default function InterviewDetail() {
   const [videoObjectUrl, setVideoObjectUrl] = useState<string | null>(null)
   const [videoError, setVideoError] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [savingDecision, setSavingDecision] = useState(false)
+  const [decisionError, setDecisionError] = useState<string | null>(null)
 
   useEffect(() => {
     apiClient
@@ -113,6 +103,19 @@ export default function InterviewDetail() {
     }
   }, [sessionId, session?.recording_path])
 
+  async function setFinalDecision(recommendation: string) {
+    setSavingDecision(true)
+    setDecisionError(null)
+    try {
+      const { data } = await apiClient.put<InterviewReport>(`/reports/session/${sessionId}`, { recommendation })
+      setReport(data)
+    } catch {
+      setDecisionError('Could not save the final decision. Please try again.')
+    } finally {
+      setSavingDecision(false)
+    }
+  }
+
   if (error) return <p className="text-sm text-red-600">{error}</p>
   if (!session || !candidate) return <p className="text-sm text-gray-500">Loading interview information...</p>
 
@@ -126,16 +129,22 @@ export default function InterviewDetail() {
         <p className="text-sm text-gray-500">{job?.title ?? 'Unknown position'}</p>
         <dl className="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
           <div>
+            <dt className="text-xs uppercase text-gray-500">Interview ID</dt>
+            <dd className="text-gray-900">#{session.id}</dd>
+          </div>
+          <div>
             <dt className="text-xs uppercase text-gray-500">Status</dt>
-            <dd className="text-gray-900">{STATUS_LABELS[session.status] ?? session.status}</dd>
+            <dd><HrStatusBadge status={session.status} /></dd>
           </div>
           <div>
             <dt className="text-xs uppercase text-gray-500">Started</dt>
             <dd className="text-gray-900">{new Date(session.created_at).toLocaleString()}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase text-gray-500">Last updated</dt>
-            <dd className="text-gray-900">{new Date(session.updated_at).toLocaleString()}</dd>
+            <dt className="text-xs uppercase text-gray-500">Duration</dt>
+            <dd className="text-gray-900">
+              {session.duration_minutes != null ? `${session.duration_minutes} min` : '—'}
+            </dd>
           </div>
           <div>
             <dt className="text-xs uppercase text-gray-500">Questions answered</dt>
@@ -167,7 +176,7 @@ export default function InterviewDetail() {
                 <p className="mt-1 font-medium text-gray-900">{q.text}</p>
                 <p className="mt-2 text-sm text-gray-700">
                   <span className="font-medium text-gray-900">Answer: </span>
-                  {q.answer?.transcript || 'No answer provided.'}
+                  {answerText(q.answer)}
                 </p>
                 {q.answer?.evaluation ? (
                   <div className="mt-2 rounded bg-gray-50 p-2 text-xs text-gray-600">
@@ -192,46 +201,47 @@ export default function InterviewDetail() {
         </div>
       </div>
 
-      {/* Transcript */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h3 className="mb-4 text-base font-medium text-gray-900">Interview Transcript</h3>
-        {answeredCount === 0 ? (
-          <p className="text-sm text-gray-500">No transcript available.</p>
-        ) : (
-          <div className="space-y-3 text-sm">
-            {session.questions
-              .slice()
-              .sort((a, b) => a.order - b.order)
-              .map((q) => (
-                <div key={q.id}>
-                  <p>
-                    <span className="font-semibold text-indigo-700">AI: </span>
-                    {q.text}
-                  </p>
-                  <p>
-                    <span className="font-semibold text-gray-900">Candidate: </span>
-                    {q.answer?.transcript || '(no response)'}
-                  </p>
-                </div>
-              ))}
-          </div>
-        )}
-      </div>
-
-      {/* Video */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h3 className="mb-4 text-base font-medium text-gray-900">Video Recording</h3>
-        {session.recording_path ? (
-          videoObjectUrl ? (
-            <video controls className="w-full max-w-xl rounded bg-black" src={videoObjectUrl} />
-          ) : videoError ? (
-            <p className="text-sm text-red-600">Could not load the video recording.</p>
+      {/* Video + Transcript — side by side on desktop, stacked on mobile */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h3 className="mb-4 text-base font-medium text-gray-900">Video Recording</h3>
+          {session.recording_path ? (
+            videoObjectUrl ? (
+              <video controls className="w-full rounded bg-black" src={videoObjectUrl} />
+            ) : videoError ? (
+              <p className="text-sm text-red-600">Could not load the video recording.</p>
+            ) : (
+              <p className="text-sm text-gray-500">Loading video...</p>
+            )
           ) : (
-            <p className="text-sm text-gray-500">Loading video...</p>
-          )
-        ) : (
-          <p className="text-sm text-gray-500">No video recording available for this interview.</p>
-        )}
+            <p className="text-sm text-gray-500">No video recording available for this interview.</p>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h3 className="mb-4 text-base font-medium text-gray-900">Interview Transcript</h3>
+          {answeredCount === 0 ? (
+            <p className="text-sm text-gray-500">No transcript available.</p>
+          ) : (
+            <div className="max-h-96 space-y-3 overflow-y-auto text-sm">
+              {session.questions
+                .slice()
+                .sort((a, b) => a.order - b.order)
+                .map((q) => (
+                  <div key={q.id}>
+                    <p>
+                      <span className="font-semibold text-indigo-700">AI: </span>
+                      {q.text}
+                    </p>
+                    <p>
+                      <span className="font-semibold text-gray-900">Candidate: </span>
+                      {answerText(q.answer)}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* AI Score section */}
@@ -267,6 +277,31 @@ export default function InterviewDetail() {
                 <span className="text-2xl font-semibold text-gray-900">{report.overall_score}/100</span>
               )}
               {report.recommendation && <RecommendationBadge recommendation={report.recommendation} />}
+            </div>
+
+            {/* Final decision is HR's call — the AI's recommendation above is
+                a suggestion; this is what actually determines the
+                Olumlu/Olumsuz outcome the candidate sees. */}
+            <div>
+              <h4 className="mb-1 text-sm font-medium text-gray-900">Final Decision (HR)</h4>
+              <div className="flex flex-wrap gap-2">
+                {(['recommended', 'maybe', 'not_recommended'] as const).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    disabled={savingDecision}
+                    onClick={() => void setFinalDecision(option)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium capitalize disabled:opacity-50 ${
+                      report.recommendation === option
+                        ? 'bg-gray-900 text-white'
+                        : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {option.replaceAll('_', ' ')}
+                  </button>
+                ))}
+              </div>
+              {decisionError && <p className="mt-2 text-xs text-red-600">{decisionError}</p>}
             </div>
             {report.strengths && report.strengths.length > 0 && (
               <div>

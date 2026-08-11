@@ -8,7 +8,6 @@ quality/profanity filter.
 """
 
 MAX_ANSWER_WORDS = 500
-_MIN_WORDS = 3
 _VOWELS = set("aeıioöuüAEIİOÖUÜ")
 
 
@@ -28,8 +27,6 @@ def validate_answer_text(text: str) -> None:
     is a separate, legitimate case handled by the caller, not by this check.
     """
     words = text.split()
-    if len(words) < _MIN_WORDS:
-        raise ValueError("Please provide a more complete answer.")
     if len(words) > MAX_ANSWER_WORDS:
         raise ValueError(f"Answers are limited to {MAX_ANSWER_WORDS} words.")
 

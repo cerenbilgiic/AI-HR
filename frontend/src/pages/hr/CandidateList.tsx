@@ -1,14 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../../api/client'
+import HrStatusBadge from '../../components/HrStatusBadge'
+import RecommendationBadge from '../../components/RecommendationBadge'
 import type { Candidate, InterviewSession, Job } from '../../types'
-
-const STATUS_LABELS: Record<string, string> = {
-  in_progress: 'In progress',
-  awaiting_review: 'Awaiting review',
-  completed: 'Completed',
-  pending: 'Pending',
-}
 
 type SortKey = 'date' | 'score'
 
@@ -28,6 +23,8 @@ export default function CandidateList() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [positionFilter, setPositionFilter] = useState('all')
+  const [recommendationFilter, setRecommendationFilter] = useState('all')
+  const [minScore, setMinScore] = useState('')
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDesc, setSortDesc] = useState(true)
 
@@ -67,6 +64,13 @@ export default function CandidateList() {
     if (positionFilter !== 'all') {
       result = result.filter((r) => String(r.candidate.job_id) === positionFilter)
     }
+    if (recommendationFilter !== 'all') {
+      result = result.filter((r) => r.session?.recommendation === recommendationFilter)
+    }
+    if (minScore.trim()) {
+      const min = Number(minScore)
+      result = result.filter((r) => r.session?.overall_score != null && r.session.overall_score >= min)
+    }
     if (sortKey) {
       result = [...result].sort((a, b) => {
         const av = sortKey === 'score' ? (a.session?.overall_score ?? -1) : new Date(a.session?.created_at ?? 0).getTime()
@@ -75,7 +79,18 @@ export default function CandidateList() {
       })
     }
     return result
-  }, [candidates, sessions, jobById, search, statusFilter, positionFilter, sortKey, sortDesc])
+  }, [
+    candidates,
+    sessions,
+    jobById,
+    search,
+    statusFilter,
+    positionFilter,
+    recommendationFilter,
+    minScore,
+    sortKey,
+    sortDesc,
+  ])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -124,6 +139,25 @@ export default function CandidateList() {
             </option>
           ))}
         </select>
+        <select
+          value={recommendationFilter}
+          onChange={(e) => setRecommendationFilter(e.target.value)}
+          className="rounded border border-gray-300 px-2 py-1.5 text-sm"
+        >
+          <option value="all">All recommendations</option>
+          <option value="recommended">Recommended</option>
+          <option value="maybe">Maybe</option>
+          <option value="not_recommended">Not recommended</option>
+        </select>
+        <input
+          type="number"
+          min={0}
+          max={100}
+          placeholder="Min score"
+          value={minScore}
+          onChange={(e) => setMinScore(e.target.value)}
+          className="w-28 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        />
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -155,14 +189,12 @@ export default function CandidateList() {
                   <p className="text-xs text-gray-500">{candidate.email}</p>
                 </td>
                 <td className="px-4 py-3 text-gray-700">{job?.title ?? '—'}</td>
-                <td className="px-4 py-3 text-gray-700">
-                  {session ? STATUS_LABELS[session.status] ?? session.status : 'Not started'}
-                </td>
+                <td className="px-4 py-3"><HrStatusBadge status={session?.status} /></td>
                 <td className="px-4 py-3 text-gray-700">
                   {session?.overall_score != null ? `${session.overall_score} / 100` : '—'}
                 </td>
-                <td className="px-4 py-3 text-gray-700 capitalize">
-                  {session?.recommendation?.replaceAll('_', ' ') ?? '—'}
+                <td className="px-4 py-3">
+                  {session?.recommendation ? <RecommendationBadge recommendation={session.recommendation} /> : '—'}
                 </td>
                 <td className="px-4 py-3 text-gray-700">
                   {session ? new Date(session.created_at).toLocaleDateString() : '—'}

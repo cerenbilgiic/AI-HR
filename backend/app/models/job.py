@@ -18,6 +18,9 @@ class Job(Base, TimestampMixin):
     skills: Mapped[list["JobSkill"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
     )
+    questions: Mapped[list["JobQuestion"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan"
+    )
 
 
 class JobSkill(Base, TimestampMixin):
@@ -29,3 +32,18 @@ class JobSkill(Base, TimestampMixin):
     required_level: Mapped[str] = mapped_column(String(50), nullable=True)
 
     job: Mapped["Job"] = relationship(back_populates="skills")
+
+
+class JobQuestion(Base, TimestampMixin):
+    """A fixed interview question HR authored for this job — every
+    candidate applying to this job is asked the same set, in order (see
+    interview_service.create_session)."""
+
+    __tablename__ = "job_questions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
+    text: Mapped[str] = mapped_column(Text)
+    order: Mapped[int] = mapped_column(default=0)
+
+    job: Mapped["Job"] = relationship(back_populates="questions")

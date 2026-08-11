@@ -37,9 +37,11 @@ def test_accepts_short_but_real_answer():
     validate_answer_text("Evet, önceki işimde kasada çalıştım.")
 
 
-def test_rejects_too_short_answer():
-    with pytest.raises(ValueError):
-        validate_answer_text("ok evet")
+def test_accepts_short_real_answer_with_no_minimum_word_count():
+    # No minimum word count — a candidate answering briefly (even a single
+    # real word) should not be blocked just for being short.
+    validate_answer_text("Evet")
+    validate_answer_text("ok evet")
 
 
 def test_rejects_answer_over_word_limit():

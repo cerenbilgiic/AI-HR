@@ -1,8 +1,8 @@
 from sqlalchemy.orm import Session
 
 from app.models.candidate import Candidate
-from app.models.job import Job, JobSkill
-from app.schemas.job import JobCreate, JobSkillIn, JobSkillUpdate, JobUpdate
+from app.models.job import Job, JobQuestion, JobSkill
+from app.schemas.job import JobCreate, JobQuestionIn, JobQuestionUpdate, JobSkillIn, JobSkillUpdate, JobUpdate
 
 
 def list_jobs(db: Session) -> list[Job]:
@@ -21,6 +21,7 @@ def create_job(db: Session, data: JobCreate, created_by_id: int) -> Job:
         location=data.location,
         created_by_id=created_by_id,
         skills=[JobSkill(name=s.name, required_level=s.required_level) for s in data.skills],
+        questions=[JobQuestion(text=q.text, order=q.order) for q in data.questions],
     )
     db.add(job)
     db.commit()
@@ -65,4 +66,29 @@ def update_job_skill(db: Session, skill: JobSkill, data: JobSkillUpdate) -> JobS
 
 def delete_job_skill(db: Session, skill: JobSkill) -> None:
     db.delete(skill)
+    db.commit()
+
+
+def add_job_question(db: Session, job: Job, data: JobQuestionIn) -> JobQuestion:
+    question = JobQuestion(job_id=job.id, text=data.text, order=data.order)
+    db.add(question)
+    db.commit()
+    db.refresh(question)
+    return question
+
+
+def get_job_question(db: Session, job_id: int, question_id: int) -> JobQuestion | None:
+    return db.query(JobQuestion).filter(JobQuestion.id == question_id, JobQuestion.job_id == job_id).first()
+
+
+def update_job_question(db: Session, question: JobQuestion, data: JobQuestionUpdate) -> JobQuestion:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(question, field, value)
+    db.commit()
+    db.refresh(question)
+    return question
+
+
+def delete_job_question(db: Session, question: JobQuestion) -> None:
+    db.delete(question)
     db.commit()
