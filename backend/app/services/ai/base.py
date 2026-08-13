@@ -55,5 +55,9 @@ class AIProvider(ABC):
         ...
 
     @abstractmethod
+    def extract_skills(self, cv_text: str, job_description: str) -> list[str]:
+        ...
+
+    @abstractmethod
     def transcribe(self, audio_path: str) -> str:
         ...

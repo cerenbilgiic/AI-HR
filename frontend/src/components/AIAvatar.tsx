@@ -5,10 +5,9 @@ import malePhoto from '../assets/avatars/male.jpg'
 export type AvatarGender = 'female' | 'male'
 export type AvatarSize = 'sm' | 'lg'
 
-const PALETTES: Record<AvatarGender, { ring: string; bar: string }> = {
-  female: { ring: 'ring-indigo-400', bar: 'bg-indigo-500' },
-  male: { ring: 'ring-slate-400', bar: 'bg-slate-500' },
-}
+// Both avatars share the same accent ring/bar color — the photo itself
+// already conveys gender, no need for a color cue.
+const PALETTE = { ring: 'ring-indigo-500', bar: 'bg-indigo-600' }
 
 const PHOTOS: Record<AvatarGender, string> = {
   female: femalePhoto,
@@ -51,7 +50,7 @@ export default function AIAvatar({
   gender?: AvatarGender
   size?: AvatarSize
 }) {
-  const palette = PALETTES[gender]
+  const palette = PALETTE
   const mouthPos = MOUTH_POSITION[gender]
   const [mouthOpen, setMouthOpen] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -99,7 +98,7 @@ export default function AIAvatar({
         />
       </div>
       {speaking && (
-        <span className="absolute -bottom-1 -right-1 flex h-5 items-end gap-0.5 rounded-full bg-white px-1.5 py-0.5 shadow ring-1 ring-gray-200">
+        <span className="absolute -bottom-1 -right-1 flex h-5 items-end gap-0.5 rounded-full bg-slate-800 px-1.5 py-0.5 shadow ring-1 ring-slate-700">
           <span className={`avatar-eq-bar w-1 rounded-sm ${palette.bar}`} style={{ animationDelay: '0ms' }} />
           <span className={`avatar-eq-bar w-1 rounded-sm ${palette.bar}`} style={{ animationDelay: '120ms' }} />
           <span className={`avatar-eq-bar w-1 rounded-sm ${palette.bar}`} style={{ animationDelay: '240ms' }} />

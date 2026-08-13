@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,7 +10,24 @@ from app.schemas.interview import AnswerSubmit
 from app.services import interview_service
 
 
+def test_create_session_raises_once_the_deadline_has_passed(db_session, candidate, job):
+    # created_at drives compute_interview_deadline (created_at + N days) —
+    # backdating it well past settings.interview_deadline_days simulates an
+    # expired application without needing to fake "now".
+    candidate.created_at = datetime.now() - timedelta(days=30)
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="deadline"):
+        interview_service.create_session(db_session, candidate)
+
+
 def test_create_session_copies_job_questions_in_order(db_session, candidate, job):
+    # Seeded candidates/demo data are intentionally backdated (so dashboard
+    # stats look realistic) and can already be past the interview deadline —
+    # reset it here since this test is about question ordering, not deadlines.
+    candidate.created_at = datetime.now()
+    db_session.commit()
+
     # Seeded jobs already have their own real HR-authored questions — clear
     # them so this test only sees the two it's adding itself.
     db_session.query(JobQuestion).filter(JobQuestion.job_id == job.id).delete()
@@ -28,9 +46,10 @@ def test_create_session_copies_job_questions_in_order(db_session, candidate, job
 
 
 def test_create_session_raises_when_job_has_no_questions(db_session, candidate, job):
+    candidate.created_at = datetime.now()
     db_session.query(JobQuestion).filter(JobQuestion.job_id == job.id).delete()
     db_session.commit()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="no interview questions"):
         interview_service.create_session(db_session, candidate)
 
 

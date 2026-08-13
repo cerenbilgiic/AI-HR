@@ -15,12 +15,19 @@ class Job(Base, TimestampMixin):
     location: Mapped[str] = mapped_column(String(100), nullable=True)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
+    created_by: Mapped["User"] = relationship()
     skills: Mapped[list["JobSkill"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
     )
     questions: Mapped[list["JobQuestion"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
     )
+
+    @property
+    def created_by_name(self) -> str | None:
+        """Lets JobOut expose the owner's display name via from_attributes
+        without every jobs.py route having to resolve it manually."""
+        return self.created_by.full_name if self.created_by else None
 
 
 class JobSkill(Base, TimestampMixin):

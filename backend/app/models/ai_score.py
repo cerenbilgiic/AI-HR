@@ -9,7 +9,8 @@ class AIScore(Base, TimestampMixin):
     __tablename__ = "ai_scores"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    session_id: Mapped[int] = mapped_column(ForeignKey("interview_sessions.id"))
+    # unique — same reasoning as InterviewReport.session_id below.
+    session_id: Mapped[int] = mapped_column(ForeignKey("interview_sessions.id"), unique=True)
     technical_competency: Mapped[float] = mapped_column(Float, nullable=True)
     communication_skills: Mapped[float] = mapped_column(Float, nullable=True)
     problem_solving: Mapped[float] = mapped_column(Float, nullable=True)
@@ -25,9 +26,23 @@ class InterviewReport(Base, TimestampMixin):
     __tablename__ = "interview_reports"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    session_id: Mapped[int] = mapped_column(ForeignKey("interview_sessions.id"))
+    # unique — one report per session. Without this, two concurrent
+    # "Evaluate" requests (e.g. HR re-clicking after the AI call seems slow)
+    # can both see no existing report and each insert their own row, and
+    # code that reads "the" report for a session (e.g. attach_report_summary)
+    # can then pick a different, stale row than the one HR is editing — see
+    # report_service.generate_final_report for how the insert races this.
+    session_id: Mapped[int] = mapped_column(ForeignKey("interview_sessions.id"), unique=True)
     summary: Mapped[str] = mapped_column(Text, nullable=True)
+    # The AI's own advisory suggestion — set once, by generate_final_report,
+    # and never touched by HR. Shown to HR as input, not a decision.
     recommendation: Mapped[str] = mapped_column(Text, nullable=True)
+    # HR's own call, set only via PUT /reports/session/{id} (the "Nihai
+    # Karar" buttons). Starts null regardless of what the AI suggested above
+    # — candidate-facing surfaces gate on this being set, not on `recommendation`
+    # or on session.status alone, so nothing reaches the candidate before a
+    # human has actually decided.
+    hr_decision: Mapped[str] = mapped_column(Text, nullable=True)
 
     # Populated by the final report generator (see app/services/report_service.py)
     # — nullable because the older, lighter /evaluate flow (finalize_session)

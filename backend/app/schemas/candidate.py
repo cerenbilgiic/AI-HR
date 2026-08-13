@@ -8,7 +8,10 @@ class CandidateCreate(BaseModel):
     email: EmailStr
     phone: str | None = None
     job_id: int
-    password: str = Field(min_length=8)
+    # None for candidates created without a chosen password (e.g. CSV
+    # import, see candidate_import_service.py) — they can only authenticate
+    # via a magic-link invitation, never candidate-login.
+    password: str | None = Field(default=None, min_length=8)
 
 
 class CandidateUpdate(BaseModel):
@@ -35,6 +38,12 @@ class CandidateOut(BaseModel):
     phone: str | None
     job_id: int
     created_at: datetime
+    # System-assigned login identifier, distinct from email above — see
+    # invitation_service.issue_credentials. None until first invited.
+    login_email: str | None = None
+    # Pre-session pipeline state — see hrStatus.ts's status derivation.
+    invited_at: datetime | None = None
+    first_login_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

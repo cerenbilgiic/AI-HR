@@ -16,34 +16,34 @@ export default function Login() {
       localStorage.setItem('access_token', data.access_token)
       navigate('/hr/dashboard')
     } catch {
-      setError('Invalid credentials')
+      setError('Geçersiz kullanıcı adı veya şifre')
     }
   }
 
   return (
     <div className="mx-auto max-w-sm">
-      <h2 className="mb-6 text-xl font-semibold text-gray-900">HR Login</h2>
+      <h2 className="mb-6 text-xl font-semibold text-slate-100">İK Girişi</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <input
           type="email"
-          placeholder="Email"
+          placeholder="E-posta"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded border border-gray-300 px-3 py-2"
+          className="w-full rounded border border-slate-700 bg-slate-800 text-slate-200 placeholder:text-slate-500 px-3 py-2"
         />
         <input
           type="password"
-          placeholder="Password"
+          placeholder="Şifre"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded border border-gray-300 px-3 py-2"
+          className="w-full rounded border border-slate-700 bg-slate-800 text-slate-200 placeholder:text-slate-500 px-3 py-2"
         />
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm font-medium text-rose-400">{error}</p>}
         <button
           type="submit"
-          className="w-full rounded bg-gray-900 px-3 py-2 text-white hover:bg-gray-800"
+          className="w-full rounded bg-indigo-600 px-3 py-2 text-white hover:bg-indigo-500"
         >
-          Sign in
+          Giriş Yap
         </button>
       </form>
     </div>

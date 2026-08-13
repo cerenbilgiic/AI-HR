@@ -21,6 +21,11 @@ class InterviewSession(Base, TimestampMixin):
     recording_content_type: Mapped[str] = mapped_column(String(100), nullable=True)
     recording_size: Mapped[int] = mapped_column(BigInteger, nullable=True)
 
+    # Deterministic anti-cheat signal, not an AI judgment — see
+    # interview_service.complete_session / InterviewViolation.
+    # min(100, violation_count * 20), null until the session completes.
+    risk_score: Mapped[int] = mapped_column(nullable=True)
+
     questions: Mapped[list["InterviewQuestion"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )

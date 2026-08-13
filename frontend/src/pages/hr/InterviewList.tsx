@@ -15,6 +15,12 @@ export default function InterviewList() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [positionFilter, setPositionFilter] = useState('all')
+  const [evaluatingId, setEvaluatingId] = useState<number | null>(null)
+  const [evaluateError, setEvaluateError] = useState<string | null>(null)
+
+  function loadSessions() {
+    return apiClient.get<InterviewSession[]>('/interviews').then((res) => setSessions(res.data))
+  }
 
   useEffect(() => {
     Promise.all([
@@ -27,8 +33,25 @@ export default function InterviewList() {
         setCandidates(candidatesRes.data)
         setJobs(jobsRes.data)
       })
-      .catch(() => setError('Unable to load interviews.'))
+      .catch(() => setError('Mülakatlar yüklenemedi.'))
   }, [])
+
+  async function evaluate(sessionId: number) {
+    setEvaluatingId(sessionId)
+    setEvaluateError(null)
+    try {
+      // generate-report (not the older evaluate) is what actually produces
+      // overall_score/competency_scores — see JobDetail.tsx's identical
+      // evaluate() for why. Re-fetches in place (no navigation) so HR can
+      // keep evaluating other rows in this same list.
+      await apiClient.post(`/interviews/${sessionId}/generate-report`)
+      await loadSessions()
+    } catch {
+      setEvaluateError('Bu mülakat değerlendirilemedi. Lütfen tekrar deneyin.')
+    } finally {
+      setEvaluatingId(null)
+    }
+  }
 
   const candidateById = useMemo(() => new Map(candidates.map((c) => [c.id, c])), [candidates])
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs])
@@ -54,38 +77,38 @@ export default function InterviewList() {
     return result.sort((a, b) => new Date(b.session.created_at).getTime() - new Date(a.session.created_at).getTime())
   }, [sessions, candidateById, jobById, search, statusFilter, positionFilter])
 
-  if (error) return <p className="text-sm text-red-600">{error}</p>
-  if (!sessions) return <p className="text-sm text-gray-500">Loading interviews...</p>
+  if (error) return <p className="text-sm font-medium text-rose-400">{error}</p>
+  if (!sessions) return <p className="text-sm text-slate-500">Mülakatlar yükleniyor...</p>
 
   return (
     <div>
-      <h2 className="mb-6 text-xl font-semibold text-gray-900">Interviews</h2>
+      <h2 className="mb-6 text-xl font-semibold text-slate-100">Mülakatlar</h2>
 
       <div className="mb-4 flex flex-wrap gap-3">
         <input
           type="text"
-          placeholder="Search by candidate name"
+          placeholder="Aday adına göre ara"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-64 rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          className="w-64 rounded border border-slate-700 bg-slate-800 text-slate-200 placeholder:text-slate-500 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
         />
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded border border-gray-300 px-2 py-1.5 text-sm"
+          className="rounded border border-slate-700 bg-slate-800 text-slate-200 placeholder:text-slate-500 px-2 py-1.5 text-sm"
         >
-          <option value="all">All statuses</option>
-          <option value="in_progress">In progress</option>
-          <option value="awaiting_review">Awaiting review</option>
-          <option value="completed">Completed</option>
-          <option value="terminated">Terminated</option>
+          <option value="all">Tüm durumlar</option>
+          <option value="in_progress">Devam Ediyor</option>
+          <option value="awaiting_review">Değerlendiriliyor</option>
+          <option value="completed">Değerlendirildi</option>
+          <option value="terminated">Sonlandırıldı</option>
         </select>
         <select
           value={positionFilter}
           onChange={(e) => setPositionFilter(e.target.value)}
-          className="rounded border border-gray-300 px-2 py-1.5 text-sm"
+          className="rounded border border-slate-700 bg-slate-800 text-slate-200 placeholder:text-slate-500 px-2 py-1.5 text-sm"
         >
-          <option value="all">All positions</option>
+          <option value="all">Tüm pozisyonlar</option>
           {jobs.map((j) => (
             <option key={j.id} value={j.id}>
               {j.title}
@@ -94,44 +117,57 @@ export default function InterviewList() {
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+      {evaluateError && <p className="mb-3 text-sm font-medium text-rose-400">{evaluateError}</p>}
+
+      <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900 shadow-sm">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+          <thead className="border-b border-slate-800 bg-slate-800/50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-3">Candidate</th>
-              <th className="px-4 py-3">Position</th>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Score</th>
-              <th className="px-4 py-3">Recommendation</th>
-              <th className="px-4 py-3">Actions</th>
+              <th className="px-4 py-3">Aday</th>
+              <th className="px-4 py-3">Pozisyon</th>
+              <th className="px-4 py-3">Tarih</th>
+              <th className="px-4 py-3">Durum</th>
+              <th className="px-4 py-3">Puan</th>
+              <th className="px-4 py-3">Tavsiye</th>
+              <th className="px-4 py-3">İşlemler</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-slate-800">
             {rows.map(({ session, candidate, job }) => (
-              <tr key={session.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 text-gray-900">{candidate?.full_name ?? 'Unknown'}</td>
-                <td className="px-4 py-3 text-gray-700">{job?.title ?? '—'}</td>
-                <td className="px-4 py-3 text-gray-700">{new Date(session.created_at).toLocaleDateString()}</td>
+              <tr key={session.id} className="hover:bg-slate-800">
+                <td className="px-4 py-3 text-slate-100">{candidate?.full_name ?? 'Bilinmiyor'}</td>
+                <td className="px-4 py-3 text-slate-300">{job?.title ?? '—'}</td>
+                <td className="px-4 py-3 text-slate-300">{new Date(session.created_at).toLocaleDateString()}</td>
                 <td className="px-4 py-3"><HrStatusBadge status={session.status} /></td>
-                <td className="px-4 py-3 text-gray-700">{session.overall_score ?? '—'}</td>
+                <td className="px-4 py-3 text-slate-300">{session.overall_score ?? '—'}</td>
                 <td className="px-4 py-3">
                   {session.recommendation ? <RecommendationBadge recommendation={session.recommendation} /> : '—'}
                 </td>
                 <td className="px-4 py-3">
-                  <button
-                    onClick={() => navigate(`/hr/interviews/${session.id}`)}
-                    className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-900 hover:bg-gray-50"
-                  >
-                    View
-                  </button>
+                  <div className="flex gap-2">
+                    {session.status === 'awaiting_review' && (
+                      <button
+                        onClick={() => void evaluate(session.id)}
+                        disabled={evaluatingId === session.id}
+                        className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+                      >
+                        {evaluatingId === session.id ? 'Değerlendiriliyor…' : 'Değerlendir'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => navigate(`/hr/interviews/${session.id}`)}
+                      className="rounded border border-slate-700 px-2 py-1 text-xs font-medium text-slate-100 hover:bg-slate-800"
+                    >
+                      Görüntüle
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-sm text-gray-500">
-                  No interviews found.
+                <td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-500">
+                  Mülakat bulunamadı.
                 </td>
               </tr>
             )}

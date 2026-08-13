@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.models.job import JobQuestion
 
 
@@ -59,6 +61,11 @@ def test_delete_nonexistent_question_returns_404(client, as_hr, job):
 def test_create_interview_session_end_to_end_uses_job_questions(
     client, as_candidate, db_session, candidate, job
 ):
+    # Seeded candidates are intentionally backdated (for realistic dashboard
+    # stats) and can already be past the interview deadline — reset it here
+    # since this test isn't about deadlines.
+    candidate.created_at = datetime.now()
+
     # Seeded jobs already have their own real HR-authored questions — clear
     # them so this test only sees the two it's adding itself.
     db_session.query(JobQuestion).filter(JobQuestion.job_id == job.id).delete()
@@ -69,6 +76,7 @@ def test_create_interview_session_end_to_end_uses_job_questions(
         ]
     )
     db_session.commit()
+    db_session.refresh(candidate)
 
     response = client.post("/api/v1/interviews")
 

@@ -102,27 +102,27 @@ export default function Consent() {
     }
   }
 
-  if (!job && !error) return <p className="text-sm text-gray-500">Yükleniyor...</p>
+  if (!job && !error) return <p className="text-sm text-slate-500">Yükleniyor...</p>
 
   return (
     <div className="mx-auto max-w-2xl">
-      <div className="mb-6 flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="mb-6 flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-sm">
         <AIAvatar speaking={speaking} />
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Mülakat Öncesi Onay</h2>
-          <p className="mt-0.5 text-xs text-gray-500">Devam etmeden önce lütfen aşağıdakileri onaylayın.</p>
+          <h2 className="text-xl font-semibold text-slate-100">Mülakat Öncesi Onay</h2>
+          <p className="mt-0.5 text-xs text-slate-500">Devam etmeden önce lütfen aşağıdakileri onaylayın.</p>
           <div className="mt-2 flex gap-2">
             <button
               type="button"
               onClick={() => speak(INTRO_TEXT)}
-              className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+              className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
             >
               🔊 Tekrar dinle
             </button>
             <button
               type="button"
               onClick={() => setMuted((m) => !m)}
-              className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+              className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
             >
               {muted ? '🔇 Sesi aç' : '🔈 Sesi kapat'}
             </button>
@@ -130,8 +130,8 @@ export default function Consent() {
         </div>
       </div>
 
-      <div className="mb-6 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-700 shadow-sm">
-        <h3 className="mb-2 font-semibold text-gray-900">
+      <div className="mb-6 max-h-72 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-4 text-sm text-slate-300 shadow-sm">
+        <h3 className="mb-2 font-semibold text-slate-100">
           Kişisel Verilerin Korunması Kanunu (KVKK) Aydınlatma Metni
         </h3>
         <p className="mb-2">
@@ -139,26 +139,26 @@ export default function Consent() {
           şirketimiz tarafından, işe alım sürecini yürütmek amacıyla aşağıda belirtilen kişisel
           verileriniz işlenmektedir.
         </p>
-        <p className="mb-1 font-medium text-gray-900">İşlenen Kişisel Veriler</p>
+        <p className="mb-1 font-medium text-slate-100">İşlenen Kişisel Veriler</p>
         <p className="mb-2">
           Ad-soyad, iletişim bilgileri, özgeçmiş (CV) içeriği, mülakat sırasında verdiğiniz sesli ve
           görüntülü yanıtlar, bu yanıtların yazıya dökülmüş hali ve yapay zekâ tarafından üretilen
           değerlendirme sonuçları.
         </p>
-        <p className="mb-1 font-medium text-gray-900">İşlenme Amacı</p>
+        <p className="mb-1 font-medium text-slate-100">İşlenme Amacı</p>
         <p className="mb-2">
           Başvurduğunuz pozisyona uygunluğunuzun değerlendirilmesi, ön mülakat sürecinin
           yürütülmesi ve işe alım kararına esas teşkil edecek bir değerlendirme raporunun
           oluşturulması.
         </p>
-        <p className="mb-1 font-medium text-gray-900">Verilerin İşlenme ve Saklanma Yöntemi</p>
+        <p className="mb-1 font-medium text-slate-100">Verilerin İşlenme ve Saklanma Yöntemi</p>
         <p className="mb-2">
           Ses ve görüntü kayıtlarınız, yapay zekâ değerlendirmesi için sistemimizde yerel olarak
           (üçüncü taraf bulut servislerine gönderilmeksizin) işlenir. Verileriniz, işe alım süreci
           sonuçlanana kadar veya ilgili mevzuatta öngörülen süre boyunca saklanır, bu sürenin sonunda
           silinir veya anonim hale getirilir.
         </p>
-        <p className="mb-1 font-medium text-gray-900">Haklarınız</p>
+        <p className="mb-1 font-medium text-slate-100">Haklarınız</p>
         <p className="mb-2">
           KVKK'nın 11. maddesi uyarınca; verilerinizin işlenip işlenmediğini öğrenme, işlenmişse buna
           ilişkin bilgi talep etme, işlenme amacını ve amacına uygun kullanılıp kullanılmadığını
@@ -168,28 +168,28 @@ export default function Consent() {
           sahipsiniz. Bu haklarınızı kullanmak için insan kaynakları departmanımızla iletişime
           geçebilirsiniz.
         </p>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-slate-500">
           Not: Bu metin bir kavram kanıtlama (PoC) ortamı için örnek amaçlı hazırlanmıştır; gerçek
           aday verisi işlenmemektedir.
         </p>
       </div>
 
-      <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-2 font-semibold text-gray-900">Başlamadan Önce</h3>
-        <p className="mb-3 text-sm text-gray-700">
+      <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4 shadow-sm">
+        <h3 className="mb-2 font-semibold text-slate-100">Başlamadan Önce</h3>
+        <p className="mb-3 text-sm text-slate-300">
           Bu mülakat kameranıza ve mikrofonunuza erişim gerektirir.
         </p>
-        <ul className="mb-4 space-y-1 text-sm text-gray-700">
+        <ul className="mb-4 space-y-1 text-sm text-slate-300">
           <li>✓ Kameranız mülakat boyunca kullanılacaktır.</li>
           <li>✓ Mikrofonunuz cevaplarınızı kaydetmek için kullanılacaktır.</li>
           <li>✓ Sesiniz metne dönüştürülebilir.</li>
           <li>✓ Cevaplarınız yapay zekâ mülakat sistemi tarafından analiz edilebilir.</li>
         </ul>
         <div className="mb-3 flex flex-wrap items-center gap-4 text-sm">
-          <span className={cameraOk ? 'text-green-700' : 'text-gray-500'}>
+          <span className={cameraOk ? 'font-medium text-slate-100' : 'text-slate-500'}>
             Kamera: {cameraOk ? '✓ Algılandı' : 'Kontrol edilmedi'}
           </span>
-          <span className={micOk ? 'text-green-700' : 'text-gray-500'}>
+          <span className={micOk ? 'font-medium text-slate-100' : 'text-slate-500'}>
             Mikrofon: {micOk ? '✓ Algılandı' : 'Kontrol edilmedi'}
           </span>
         </div>
@@ -197,28 +197,28 @@ export default function Consent() {
           type="button"
           onClick={testDevices}
           disabled={testingDevices}
-          className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
         >
           {testingDevices ? 'Kontrol ediliyor…' : 'Kamera ve Mikrofonu Test Et'}
         </button>
-        {deviceError && <p className="mt-2 text-sm text-red-600">{deviceError}</p>}
+        {deviceError && <p className="mt-2 text-sm font-medium text-rose-400">{deviceError}</p>}
       </div>
 
-      <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
-        <h3 className="mb-1 font-semibold text-amber-900">Mülakat Sırasında Dikkat Edilmesi Gerekenler</h3>
-        <p className="text-sm text-amber-800">
+      <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 shadow-sm">
+        <h3 className="mb-1 font-semibold text-amber-300">Mülakat Sırasında Dikkat Edilmesi Gerekenler</h3>
+        <p className="text-sm text-slate-300">
           Mülakat başladıktan sonra başka bir sekmeye veya uygulamaya geçmeyiniz. İlk geçişte size bir
           uyarı gösterilir; ikinci kez sekme veya uygulama değiştirirseniz mülakatınız otomatik olarak
           sonlandırılır ve tekrar giriş yapamazsınız. Mülakatı tamamlayana kadar bu sayfada kalınız.
         </p>
       </div>
 
-      <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4 shadow-sm">
         {job && (
-          <label className="flex items-start gap-2 text-sm text-gray-900">
+          <label className="flex items-start gap-2 text-sm text-slate-100">
             <input
               type="checkbox"
-              className="mt-0.5 accent-indigo-600"
+              className="mt-0.5 accent-indigo-500"
               checked={positionConfirmed}
               onChange={(e) => setPositionConfirmed(e.target.checked)}
             />
@@ -228,10 +228,10 @@ export default function Consent() {
           </label>
         )}
         {CONSENT_ITEMS.map((item) => (
-          <label key={item.key} className="flex items-start gap-2 text-sm text-gray-900">
+          <label key={item.key} className="flex items-start gap-2 text-sm text-slate-100">
             <input
               type="checkbox"
-              className="mt-0.5 accent-indigo-600"
+              className="mt-0.5 accent-indigo-500"
               checked={accepted[item.key]}
               onChange={(e) => setAccepted((prev) => ({ ...prev, [item.key]: e.target.checked }))}
             />
@@ -240,11 +240,11 @@ export default function Consent() {
         ))}
       </div>
 
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-sm font-medium text-rose-400">{error}</p>}
       <button
         disabled={!allAccepted || submitting}
         onClick={handleContinue}
-        className="mt-6 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 disabled:opacity-40"
+        className="mt-6 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500 disabled:opacity-40"
       >
         {submitting ? 'Kaydediliyor…' : 'Kabul ediyorum, devam et'}
       </button>

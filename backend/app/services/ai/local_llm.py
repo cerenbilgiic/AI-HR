@@ -10,6 +10,12 @@ from app.services.ai.local_stt import LocalWhisperSTT
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
+# Skill names must be Turkish/Latin text only — the local model occasionally
+# tacks on stray CJK/other-script fragments (seen in practice, e.g.
+# "Veri tabanı管理工作经验"). Reject rather than strip: a partially-mangled
+# name is worse than just dropping that one skill.
+_CLEAN_SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9ÇçĞğİıÖöŞşÜü .,/()#+&'’-]+$")
+
 
 def _strip_json_fence(text: str) -> str:
     return _JSON_FENCE_RE.sub("", text.strip())
@@ -165,6 +171,15 @@ class LocalOllamaProvider(AIProvider):
     def analyze_cv(self, cv_text: str, job_description: str) -> dict:
         prompt = prompts.CV_ANALYSIS_PROMPT.format(job_description=job_description, cv_text=cv_text)
         return _parse_json(self._chat(prompt))
+
+    def extract_skills(self, cv_text: str, job_description: str) -> list[str]:
+        prompt = prompts.CV_SKILL_EXTRACTION_PROMPT.format(job_description=job_description, cv_text=cv_text)
+        data = _parse_json(self._chat(prompt))
+        skills = data.get("skills", [])
+        if not isinstance(skills, list):
+            return []
+        cleaned = [s.strip() for s in skills if isinstance(s, str) and s.strip()]
+        return [s for s in cleaned if _CLEAN_SKILL_NAME_RE.match(s)][:12]
 
     def transcribe(self, audio_path: str) -> str:
         return self._stt.transcribe(audio_path)

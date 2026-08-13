@@ -60,6 +60,7 @@ class InterviewReportOut(BaseModel):
     session_id: int
     summary: str | None
     recommendation: str | None
+    hr_decision: str | None = None
     scores: AIScoreOut | None = None
     # Populated only by the final report generator (report_service.py) —
     # None for reports created by the older, lighter /evaluate flow.
@@ -74,4 +75,8 @@ class InterviewReportOut(BaseModel):
 
 class InterviewReportUpdate(BaseModel):
     summary: str | None = None
-    recommendation: str | None = None
+    # HR's own decision — validated against the same enum as the AI's
+    # suggestion so a bad value 400s instead of silently corrupting the
+    # field. This is deliberately not `recommendation`: that field is the
+    # AI's advisory output and must never be overwritten by this endpoint.
+    hr_decision: RecommendationEnum | None = None

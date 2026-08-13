@@ -32,6 +32,29 @@ def get_current_user(
     return user
 
 
+def role_name(user: User) -> str | None:
+    """Shared by users.py and jobs.py — both need "is this caller self /
+    hr_manager-of-target / admin" checks for a target that may itself be a
+    User (users.py) or a Job's owner (jobs.py's transfer endpoints)."""
+    return user.role.name if user.role else None
+
+
+def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Gate for true-admin-only screens (currently just the audit log) —
+    "hr_manager" does not qualify here, see get_current_manager below."""
+    if role_name(current_user) != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return current_user
+
+
+def get_current_manager(current_user: User = Depends(get_current_user)) -> User:
+    """Gate for staff-management screens (the Employees list) — both
+    "hr_manager" and "admin" qualify; a plain "hr" account does not."""
+    if role_name(current_user) not in ("hr_manager", "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bu işlem için yönetici yetkisi gereklidir.")
+    return current_user
+
+
 def get_current_candidate(
     token: str = Depends(candidate_oauth2_scheme), db: Session = Depends(get_db)
 ) -> Candidate:

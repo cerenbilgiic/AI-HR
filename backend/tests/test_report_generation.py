@@ -171,7 +171,7 @@ def test_generate_report_no_prior_evaluations_uses_placeholder_text(db_session, 
     report_service.generate_final_report(db_session, session.id)
 
     kwargs = provider.generate_final_report.call_args.kwargs
-    assert "No prior AI evaluations" in kwargs["answer_evaluations"]
+    assert "önceki bir yapay zekâ değerlendirmesi bulunmuyor" in kwargs["answer_evaluations"]
 
 
 # API-level tests (endpoint wiring, auth, HTTP status mapping)
@@ -212,6 +212,62 @@ def test_generate_report_endpoint_nonexistent_session(client, as_hr, mocker):
     _mock_provider(mocker)
     response = client.post("/api/v1/interviews/999999/generate-report")
     assert response.status_code == 404
+
+
+def test_generate_report_survives_concurrent_duplicate_insert(db_session, candidate, job, mocker):
+    # Regression: two "Evaluate" requests close together (e.g. HR re-clicking
+    # after the first seemed slow) used to both see no existing report and
+    # each insert their own row — the session's report/recommendation shown
+    # elsewhere (attach_report_summary) could then silently pick a different,
+    # stale row than the one HR was actually editing. Simulates the second
+    # request's row landing while this call is still "waiting" on the AI.
+    session = _build_five_question_session(db_session, candidate, job)
+
+    def fake_ai_call(**kwargs):
+        db_session.add(
+            InterviewReport(
+                session_id=session.id,
+                summary="Winner (concurrent request)",
+                recommendation="not_recommended",
+                overall_score=10,
+                competency_scores={
+                    "communication": 10,
+                    "technical_competency": 10,
+                    "problem_solving": 10,
+                    "teamwork": 10,
+                    "customer_service": 10,
+                    "role_fit": 10,
+                },
+                strengths=[],
+                development_areas=[],
+                evidence=[],
+            )
+        )
+        db_session.commit()
+        return _valid_llm_response()
+
+    provider = MagicMock()
+    provider.generate_final_report.side_effect = fake_ai_call
+    mocker.patch("app.services.report_service.get_ai_provider", return_value=provider)
+
+    result = report_service.generate_final_report(db_session, session.id)
+
+    assert result.summary == "Winner (concurrent request)"
+    assert (
+        db_session.query(InterviewReport).filter(InterviewReport.session_id == session.id).count() == 1
+    )
+
+
+def test_interview_reports_session_id_is_unique_at_db_level(db_session, interview_session):
+    from sqlalchemy.exc import IntegrityError
+
+    db_session.add(InterviewReport(session_id=interview_session.id, summary="first"))
+    db_session.commit()
+
+    db_session.add(InterviewReport(session_id=interview_session.id, summary="second"))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
 
 
 def test_generate_report_endpoint_second_call_does_not_regenerate(

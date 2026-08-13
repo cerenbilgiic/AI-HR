@@ -22,6 +22,7 @@ Kurallar:
 - Soruların zorluk seviyelerini çeşitlendir.
 - Adayı henüz değerlendirme. Bu aşamada yalnızca soru üret.
 - Çıktıyı yalnızca geçerli JSON formatında döndür.
+- Tüm soruları TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
 
 İŞ İLANI:
 {job_description}
@@ -48,11 +49,13 @@ TOPLAM SORU SAYISI:
 }}
 """
 
-FOLLOW_UP_PROMPT = """The candidate was asked: "{question}"
-They answered: "{answer}"
+FOLLOW_UP_PROMPT = """Adaya şu soru soruldu: "{question}"
+Aday şu cevabı verdi: "{answer}"
 
-If a natural, useful follow-up question would help clarify or probe deeper,
-return it. Otherwise return an empty response.
+Cevabı netleştirecek veya daha derinlemesine inceleyecek doğal, faydalı bir
+takip sorusu varsa onu döndür. Yoksa boş bir yanıt döndür.
+
+Takip sorusunu TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
 """
 
 ADAPTIVE_EVALUATION_PROMPT = """Sen adaptif bir yapay zekâ mülakat asistanısın.
@@ -85,6 +88,7 @@ ADAYIN CEVABI:
 9. Adayın CV'sinde bulunmayan bilgileri varsayma.
 10. Tek seferde yalnızca BİR soru üret.
 11. Sorular profesyonel, açık ve adayın deneyim seviyesine uygun olmalıdır.
+12. "geri_bildirim" ve "yeni_soru" alanlarını TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
 
 Çıktıyı yalnızca aşağıdaki JSON formatında döndür:
 
@@ -98,39 +102,60 @@ ADAYIN CEVABI:
 }}
 """
 
-ANSWER_EVALUATION_PROMPT = """Job description:
+ANSWER_EVALUATION_PROMPT = """İş ilanı:
 {job_description}
 
-Question: {question}
-Candidate answer: {answer}
+Soru: {question}
+Adayın cevabı: {answer}
 
-Evaluate the answer on a 0-10 scale for: technical_competency, communication_skills,
-problem_solving, job_role_compatibility, response_quality, confidence.
-Respond as JSON with those six keys plus a one-sentence "notes" field.
+Cevabı şu kriterlere göre 0-10 arasında değerlendir: technical_competency,
+communication_skills, problem_solving, job_role_compatibility, response_quality,
+confidence.
+Yanıtı, bu altı anahtarın yanına bir de tek cümlelik "notes" alanı ekleyerek
+JSON olarak ver. "notes" alanını TÜRKÇE yaz.
 """
 
-REPORT_GENERATION_PROMPT = """Job description:
+REPORT_GENERATION_PROMPT = """İş ilanı:
 {job_description}
 
-Full interview transcript (question/answer pairs):
+Mülakatın tam dökümü (soru/cevap çiftleri):
 {transcript}
 
-Write a short summary of the candidate's performance and a final hire
-recommendation (Recommend / Consider / Do Not Recommend) with justification.
-Respond as JSON with keys "summary" and "recommendation".
+Adayın performansına dair kısa bir özet ve gerekçesiyle birlikte nihai bir
+işe alım tavsiyesi ("recommended", "maybe" veya "not_recommended") yaz.
+Yanıtı "summary" ve "recommendation" anahtarlarıyla JSON olarak ver.
+"summary" alanını TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
 """
 
-CV_ANALYSIS_PROMPT = """Job description:
+CV_SKILL_EXTRACTION_PROMPT = """İş ilanı:
 {job_description}
 
-Candidate CV:
+Aday özgeçmişi:
 {cv_text}
 
-Analyze how well this CV fits the job description. Identify the candidate's
-strengths and weaknesses (gaps, missing skills or experience) relative to the
-role, and write a short overall summary of their fit.
-Respond as JSON with keys "strengths" (a list of short strings), "weaknesses"
-(a list of short strings), and "summary" (a one-paragraph string).
+Bu özgeçmişten adayın sahip olduğu somut becerileri, yetkinlikleri ve uzmanlık
+alanlarını çıkar (örn. "Müşteri hizmetleri", "Stok yönetimi", "MS Excel",
+"Takım liderliği"). Sadece özgeçmişte açıkça belirtilen veya güçlü şekilde
+ima edilen becerileri listele, uydurma.
+
+TÜRKÇE yaz. En fazla 12 kısa beceri adı içeren bir liste döndür.
+Yanıtı sadece "skills" anahtarlı bir JSON nesnesi olarak ver, örn.:
+{{"skills": ["Müşteri hizmetleri", "Stok yönetimi"]}}
+"""
+
+CV_ANALYSIS_PROMPT = """İş ilanı:
+{job_description}
+
+Aday özgeçmişi:
+{cv_text}
+
+Bu özgeçmişin iş ilanına ne kadar uygun olduğunu analiz et. Adayın pozisyona
+göre güçlü ve zayıf yönlerini (eksik beceri veya deneyimlerini) belirle ve
+uygunluğu hakkında kısa bir genel özet yaz.
+Yanıtı "strengths" (kısa madde listesi), "weaknesses" (kısa madde listesi) ve
+"summary" (tek paragraflık metin) anahtarlarıyla JSON olarak ver.
+
+TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
 """
 
 FINAL_REPORT_PROMPT = """Sen perakende sektöründeki işe alım süreçlerine özelleşmiş bir yapay zekâ mülakat değerlendirme asistanısın.

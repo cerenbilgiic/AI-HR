@@ -10,7 +10,7 @@ from app.main import app
 from app.models.candidate import Candidate
 from app.models.interview import InterviewQuestion, InterviewSession
 from app.models.job import Job
-from app.models.user import User
+from app.models.user import Role, User
 from app.services.storage import MediaStorage, get_media_storage
 
 
@@ -80,6 +80,20 @@ def hr_user(db_session) -> User:
 
 
 @pytest.fixture()
+def admin_user(db_session) -> User:
+    user = db_session.query(User).join(Role).filter(Role.name == "admin").first()
+    assert user is not None, "expected at least one seeded admin user"
+    return user
+
+
+@pytest.fixture()
+def manager_user(db_session) -> User:
+    user = db_session.query(User).join(Role).filter(Role.name == "hr_manager").first()
+    assert user is not None, "expected at least one seeded hr_manager user"
+    return user
+
+
+@pytest.fixture()
 def job(db_session) -> Job:
     job = db_session.query(Job).first()
     assert job is not None, "expected at least one seeded job"
@@ -138,3 +152,15 @@ def as_other_candidate(client, other_candidate):
 def as_hr(client, hr_user):
     override_auth(hr_user)
     yield hr_user
+
+
+@pytest.fixture()
+def as_admin(client, admin_user):
+    override_auth(admin_user)
+    yield admin_user
+
+
+@pytest.fixture()
+def as_manager(client, manager_user):
+    override_auth(manager_user)
+    yield manager_user

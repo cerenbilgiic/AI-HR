@@ -21,7 +21,7 @@ export default function Settings() {
     apiClient
       .get<HrUser>('/users/me')
       .then((res) => setUser(res.data))
-      .catch(() => setError('Unable to load your settings.'))
+      .catch(() => setError('Ayarlarınız yüklenemedi.'))
   }, [])
 
   function toggleNotifications() {
@@ -35,48 +35,48 @@ export default function Settings() {
     navigate('/hr/login')
   }
 
-  if (error) return <p className="text-sm text-red-600">{error}</p>
-  if (!user) return <p className="text-sm text-gray-500">Loading settings...</p>
+  if (error) return <p className="text-sm font-medium text-rose-400">{error}</p>
+  if (!user) return <p className="text-sm text-slate-500">Ayarlar yükleniyor...</p>
 
   return (
     <div>
-      <h2 className="mb-6 text-xl font-semibold text-gray-900">Settings</h2>
+      <h2 className="mb-6 text-xl font-semibold text-slate-100">Ayarlar</h2>
       <div className="max-w-lg space-y-6">
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-3 text-base font-medium text-gray-900">Account Settings</h3>
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-sm">
+          <h3 className="mb-3 text-base font-medium text-slate-100">Hesap Ayarları</h3>
           <dl className="space-y-2 text-sm">
             <div>
-              <dt className="text-xs uppercase text-gray-500">Name</dt>
-              <dd className="text-gray-900">{user.full_name}</dd>
+              <dt className="text-xs uppercase text-slate-500">Ad Soyad</dt>
+              <dd className="text-slate-100">{user.full_name}</dd>
             </div>
             <div>
-              <dt className="text-xs uppercase text-gray-500">Email</dt>
-              <dd className="text-gray-900">{user.email}</dd>
+              <dt className="text-xs uppercase text-slate-500">E-posta</dt>
+              <dd className="text-slate-100">{user.email}</dd>
             </div>
           </dl>
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-1 text-base font-medium text-gray-900">Notification Preferences</h3>
-          <p className="mb-3 text-xs text-gray-500">This preference is stored in this browser only.</p>
-          <label className="flex items-center gap-2 text-sm text-gray-900">
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-sm">
+          <h3 className="mb-1 text-base font-medium text-slate-100">Bildirim Tercihleri</h3>
+          <p className="mb-3 text-xs text-slate-500">Bu tercih yalnızca bu tarayıcıda saklanır.</p>
+          <label className="flex items-center gap-2 text-sm text-slate-100">
             <input
               type="checkbox"
-              className="accent-indigo-600"
+              className="accent-indigo-500"
               checked={notificationsEnabled}
               onChange={toggleNotifications}
             />
-            Show interview status notifications
+            Mülakat durum bildirimlerini göster
           </label>
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-3 text-base font-medium text-gray-900">Account</h3>
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-sm">
+          <h3 className="mb-3 text-base font-medium text-slate-100">Hesap</h3>
           <button
             onClick={handleLogout}
-            className="rounded border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+            className="rounded border border-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800"
           >
-            Logout
+            Çıkış Yap
           </button>
         </div>
       </div>

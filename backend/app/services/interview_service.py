@@ -1,3 +1,6 @@
+from datetime import datetime
+
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.ai_evaluation import AIEvaluation
@@ -5,6 +8,7 @@ from app.models.ai_score import AIScore, InterviewReport
 from app.models.candidate import Candidate
 from app.models.interview import CandidateAnswer, InterviewQuestion, InterviewSession
 from app.models.job import Job
+from app.models.violation import InterviewViolation
 from app.schemas.interview import (
     AnswerSubmit,
     InterviewQuestionCreate,
@@ -13,6 +17,7 @@ from app.schemas.interview import (
 )
 from app.schemas.report import AIScoreUpdate, InterviewReportUpdate
 from app.services.ai import get_ai_provider
+from app.services.candidate_service import compute_interview_deadline
 from app.services.storage import MediaStorage
 from app.services.text_quality import validate_answer_text
 
@@ -43,6 +48,12 @@ def create_session(db: Session, candidate: Candidate) -> InterviewSession:
         raise ValueError(
             "Your interview was terminated for leaving the interview screen and cannot be restarted"
         )
+
+    # compute_interview_deadline is naive (candidate.created_at comes from
+    # MySQL's naive func.now()) — compare against a naive "now" too, not
+    # datetime.now(timezone.utc), or this raises on the comparison.
+    if datetime.now() > compute_interview_deadline(candidate):
+        raise ValueError("The interview deadline for this application has passed")
 
     job = db.get(Job, candidate.job_id)
     if not job or not job.questions:
@@ -239,6 +250,8 @@ def attach_report_summary(db: Session, sessions: list[InterviewSession]) -> None
         report = reports.get(session.id)
         session.overall_score = report.overall_score if report else None
         session.recommendation = report.recommendation if report else None
+        session.hr_decision = report.hr_decision if report else None
+        session.report_created_at = report.created_at if report else None
 
 
 def attach_completion_stats(db: Session, sessions: list[InterviewSession]) -> None:
@@ -257,6 +270,48 @@ def attach_completion_stats(db: Session, sessions: list[InterviewSession]) -> No
             session.duration_minutes = max(round((last - session.created_at).total_seconds() / 60), 0)
         else:
             session.duration_minutes = None
+
+
+def attach_violation_summary(db: Session, sessions: list[InterviewSession]) -> None:
+    """Transient violation_counts (by type) for the HR review screen's
+    Integrity card — see InterviewDetail.tsx. Not folded into
+    get_session/list_sessions, same N+1-avoidance reason as
+    attach_report_summary above.
+
+    Also recomputes risk_score live from the same count whenever a stored
+    snapshot exists, rather than trusting the value complete_session/
+    terminate_session persisted at the time — the frontend's violation-log
+    call is fire-and-forget (see Interview.tsx's logViolation), so a
+    terminate request can reach the backend and snapshot the risk score
+    before an in-flight violation POST has committed, undercounting it.
+    Recomputing here is always correct because by the time anyone views the
+    report, that request has long since landed.
+    """
+    if not sessions:
+        return
+    session_ids = [s.id for s in sessions]
+    counts_by_session: dict[int, dict[str, int]] = {sid: {} for sid in session_ids}
+    for violation in db.query(InterviewViolation).filter(InterviewViolation.session_id.in_(session_ids)):
+        bucket = counts_by_session[violation.session_id]
+        bucket[violation.violation_type] = bucket.get(violation.violation_type, 0) + 1
+    for session in sessions:
+        counts = counts_by_session.get(session.id, {})
+        session.violation_counts = counts
+        if session.risk_score is not None:
+            session.risk_score = min(100, sum(counts.values()) * 20)
+
+
+def log_violation(db: Session, session: InterviewSession, violation_type: str) -> InterviewViolation:
+    violation = InterviewViolation(session_id=session.id, violation_type=violation_type)
+    db.add(violation)
+    db.commit()
+    db.refresh(violation)
+    return violation
+
+
+def _compute_risk_score(db: Session, session: InterviewSession) -> int:
+    count = db.query(InterviewViolation).filter(InterviewViolation.session_id == session.id).count()
+    return min(100, count * 20)
 
 
 def update_session_status(
@@ -370,6 +425,7 @@ def complete_session(db: Session, session: InterviewSession) -> InterviewSession
     if session.status != "in_progress":
         raise ValueError("This interview is no longer active")
     session.status = "awaiting_review"
+    session.risk_score = _compute_risk_score(db, session)
     db.commit()
     db.refresh(session)
     return session
@@ -385,6 +441,7 @@ def terminate_session(db: Session, session: InterviewSession) -> InterviewSessio
     if session.status != "in_progress":
         raise ValueError("Only an in-progress interview can be terminated")
     session.status = "terminated"
+    session.risk_score = _compute_risk_score(db, session)
     db.commit()
     db.refresh(session)
     return session
@@ -430,7 +487,19 @@ def finalize_session(db: Session, session_id: int) -> InterviewReport:
 
     session.status = "completed"
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost the race to a concurrent call that inserted its own report
+        # for this session first (see interview_reports.session_id's unique
+        # constraint) — discard this one and hand back the winner.
+        db.rollback()
+        winner = db.query(InterviewReport).filter(InterviewReport.session_id == session_id).first()
+        if winner is None:
+            raise
+        session.status = "completed"
+        db.commit()
+        return winner
     db.refresh(report)
     return report
 

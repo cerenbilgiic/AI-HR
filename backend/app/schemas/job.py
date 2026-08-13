@@ -55,6 +55,8 @@ class JobOut(BaseModel):
     description: str
     department: str | None
     location: str | None
+    created_by_id: int
+    created_by_name: str | None = None
     skills: list[JobSkillOut] = []
     questions: list[JobQuestionOut] = []
 

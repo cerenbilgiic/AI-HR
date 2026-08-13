@@ -13,20 +13,33 @@ export const STATUS_LABELS: Record<SessionStatus, string> = {
   terminated: 'Sonlandırıldı',
 }
 
-export const STATUS_BADGE_CLASSES: Record<SessionStatus, string> = {
-  pending: 'bg-gray-100 text-gray-700',
-  in_progress: 'bg-blue-100 text-blue-700',
-  awaiting_review: 'bg-amber-100 text-amber-700',
-  completed: 'bg-green-100 text-green-700',
-  terminated: 'bg-red-100 text-red-700',
+// Translucent color pills for the dark theme — matches utils/hrStatus.ts's
+// palette so a given status reads the same color on both the HR and
+// candidate sides.
+const BADGE_CLASSES: Record<SessionStatus, string> = {
+  pending: 'bg-slate-500/15 text-slate-400',
+  in_progress: 'bg-violet-500/15 text-violet-400',
+  awaiting_review: 'bg-amber-500/15 text-amber-400',
+  completed: 'bg-emerald-500/15 text-emerald-400',
+  terminated: 'bg-rose-500/15 text-rose-400',
 }
 
 export function statusLabel(status: string): string {
   return STATUS_LABELS[status as SessionStatus] ?? status
 }
 
-export function statusBadgeClasses(status: string): string {
-  return STATUS_BADGE_CLASSES[status as SessionStatus] ?? 'bg-gray-100 text-gray-700'
+export function statusBadgeClasses(status?: string): string {
+  return BADGE_CLASSES[status as SessionStatus] ?? BADGE_CLASSES.pending
+}
+
+// The AI finishing its evaluation flips session.status to "completed"
+// immediately — before HR has reviewed anything. Candidate-facing pages
+// must not say "Değerlendirildi" (or unlock the result) until HR has
+// actually recorded a decision (InterviewReport.hr_decision, surfaced here
+// as session.hr_decision) — until then this keeps showing the existing
+// "Değerlendiriliyor" presentation.
+export function candidateFacingStatus(session: { status: string; hr_decision?: string | null }): string {
+  return session.status === 'completed' && !session.hr_decision ? 'awaiting_review' : session.status
 }
 
 // "Applied" is the only application-level state that exists before any

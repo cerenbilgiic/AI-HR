@@ -2,7 +2,7 @@ import io
 import uuid
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,9 @@ from app.schemas.candidate import (
     ConsentIn,
     ConsentOut,
 )
-from app.services import candidate_service
+from app.schemas.invitation import CandidateImportSummary, InvitationOut
+from app.services import candidate_import_service, candidate_service, invitation_service
+from app.services.cv_text_extraction import extract_cv_text
 from app.services.docx_report import build_cv_analysis_docx
 from app.services.media_constraints import ALLOWED_CV_TYPES, MAX_CV_SIZE_BYTES
 from app.services.storage import MediaStorage, get_media_storage
@@ -81,15 +83,20 @@ def update_my_candidate_profile(
 
 @router.post("/me/cv", response_model=CandidateCVOut, status_code=status.HTTP_201_CREATED)
 def upload_my_cv(
+    background_tasks: BackgroundTasks,
     cv: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_candidate: Candidate = Depends(get_current_candidate),
     storage: MediaStorage = Depends(get_media_storage),
 ) -> CandidateCVOut:
     """Candidate-only self-service CV upload — see pages/candidate/MyProfile.tsx.
-    Only stores the file (same MediaStorage abstraction already used for
-    interview recordings); no parsing/analysis happens here, that stays the
-    HR-triggered /cvs/{cv_id}/analysis flow.
+    Stores the file (same MediaStorage abstraction already used for interview
+    recordings), extracts its text synchronously (fast, local, no AI), then
+    schedules AI skill-extraction as a background task — that call can take
+    well over a minute on a cold local model, so it must not block this
+    response (see candidate_service.extract_and_merge_cv_skills). Structured
+    CV analysis (strengths/weaknesses) stays the separate HR-triggered
+    /cvs/{cv_id}/analysis flow.
     """
     content_type = (cv.content_type or "").split(";")[0].strip()
     extension = ALLOWED_CV_TYPES.get(content_type)
@@ -114,7 +121,53 @@ def upload_my_cv(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not upload CV: {exc}") from exc
 
-    return candidate_service.add_candidate_cv(db, current_candidate, CandidateCVCreate(file_path=object_key))
+    parsed_text = extract_cv_text(data, content_type)
+    saved_cv = candidate_service.add_candidate_cv(
+        db, current_candidate, CandidateCVCreate(file_path=object_key, parsed_text=parsed_text or None)
+    )
+
+    if parsed_text:
+        background_tasks.add_task(candidate_service.extract_and_merge_cv_skills, current_candidate.id, saved_cv.id)
+
+    return saved_cv
+
+
+@router.get("/import/template")
+def download_import_template(current_user: User = Depends(get_current_user)) -> StreamingResponse:
+    buffer = candidate_import_service.build_template_xlsx()
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="aday_import_sablonu.xlsx"'},
+    )
+
+
+@router.post("/import", response_model=CandidateImportSummary)
+def import_candidates(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CandidateImportSummary:
+    data = file.file.read()
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+    return candidate_import_service.parse_and_import(db, file.filename or "", data, actor_id=current_user.id)
+
+
+@router.post("/invite-bulk", response_model=list[InvitationOut])
+def invite_candidates_bulk(
+    candidate_ids: list[int],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[InvitationOut]:
+    results = []
+    for candidate_id in candidate_ids:
+        candidate = _get_candidate_or_404(db, candidate_id)
+        issued = invitation_service.issue_credentials(db, candidate, actor_id=current_user.id)
+        results.append(
+            InvitationOut(candidate_id=candidate.id, login_email=issued.login_email, password=issued.password)
+        )
+    return results
 
 
 @router.get("/{candidate_id}", response_model=CandidateDetailOut)
@@ -126,6 +179,17 @@ def get_candidate(
     candidate = _get_candidate_or_404(db, candidate_id)
     candidate.interview_deadline = candidate_service.compute_interview_deadline(candidate)
     return candidate
+
+
+@router.post("/{candidate_id}/invite", response_model=InvitationOut)
+def invite_candidate(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> InvitationOut:
+    candidate = _get_candidate_or_404(db, candidate_id)
+    issued = invitation_service.issue_credentials(db, candidate, actor_id=current_user.id)
+    return InvitationOut(candidate_id=candidate.id, login_email=issued.login_email, password=issued.password)
 
 
 def _get_candidate_or_404(db: Session, candidate_id: int) -> Candidate:

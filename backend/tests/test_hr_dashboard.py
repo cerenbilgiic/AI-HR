@@ -37,12 +37,69 @@ def test_get_session_includes_report_summary_when_present(
 
     assert body["overall_score"] == 77
     assert body["recommendation"] == "recommended"
+    assert body["report_created_at"] is not None
+    # HR hasn't decided anything yet — the AI's suggestion above must not
+    # leak into hr_decision, which is only ever set via the Nihai Karar PUT.
+    assert body["hr_decision"] is None
 
 
 def test_get_session_report_summary_null_when_absent(client, as_hr, interview_session):
     body = client.get(f"/api/v1/interviews/{interview_session.id}").json()
     assert body["overall_score"] is None
     assert body["recommendation"] is None
+    assert body["report_created_at"] is None
+    assert body["hr_decision"] is None
+
+
+def test_hr_decision_starts_null_even_when_ai_suggests_something(
+    client, as_hr, db_session, interview_session
+):
+    """Regression test for the exact bug reported: the AI's own suggestion
+    must never appear as if HR had already picked it."""
+    db_session.add(
+        InterviewReport(session_id=interview_session.id, recommendation="not_recommended")
+    )
+    db_session.commit()
+
+    response = client.get(f"/api/v1/reports/session/{interview_session.id}")
+
+    assert response.json()["recommendation"] == "not_recommended"
+    assert response.json()["hr_decision"] is None
+
+
+def test_put_report_sets_hr_decision_without_touching_ai_recommendation(
+    client, as_hr, db_session, interview_session
+):
+    db_session.add(
+        InterviewReport(session_id=interview_session.id, recommendation="not_recommended")
+    )
+    db_session.commit()
+
+    response = client.put(
+        f"/api/v1/reports/session/{interview_session.id}", json={"hr_decision": "recommended"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hr_decision"] == "recommended"
+    # The AI's own suggestion is untouched by HR's decision.
+    assert body["recommendation"] == "not_recommended"
+
+    # Reflected back on the session summary too, where the candidate-facing
+    # gate reads it from.
+    session_body = client.get(f"/api/v1/interviews/{interview_session.id}").json()
+    assert session_body["hr_decision"] == "recommended"
+
+
+def test_put_report_rejects_invalid_hr_decision(client, as_hr, db_session, interview_session):
+    db_session.add(InterviewReport(session_id=interview_session.id))
+    db_session.commit()
+
+    response = client.put(
+        f"/api/v1/reports/session/{interview_session.id}", json={"hr_decision": "strong_hire"}
+    )
+
+    assert response.status_code == 422
 
 
 def test_list_sessions_includes_report_summary(client, as_hr, db_session, interview_session):

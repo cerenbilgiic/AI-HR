@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { candidateApiClient } from '../../api/client'
 import StatusBadge from '../../components/StatusBadge'
-import { formatDate, latestSessionOf } from '../../utils/interviewStatus'
+import { candidateFacingStatus, formatDate, latestSessionOf } from '../../utils/interviewStatus'
 import type { CandidateDetail, InterviewSession, Job } from '../../types'
 
 export default function MyApplications() {
@@ -30,8 +30,8 @@ export default function MyApplications() {
       .catch(() => setError('Başvurularınız yüklenemedi. Lütfen tekrar deneyin.'))
   }, [])
 
-  if (error) return <p className="text-sm text-red-600">{error}</p>
-  if (!candidate || !job || !sessions) return <p className="text-sm text-gray-500">Yükleniyor...</p>
+  if (error) return <p className="text-sm font-medium text-rose-400">{error}</p>
+  if (!candidate || !job || !sessions) return <p className="text-sm text-slate-500">Yükleniyor...</p>
 
   const latestSession = latestSessionOf(sessions)
 
@@ -48,18 +48,18 @@ export default function MyApplications() {
 
   return (
     <div>
-      <h2 className="mb-4 text-xl font-semibold text-gray-900">Başvurularım</h2>
-      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <p className="text-sm font-medium text-gray-900">{job.title}</p>
-        {job.department && <p className="text-xs text-gray-500">{job.department}</p>}
-        <p className="mt-2 text-xs text-gray-500">Başvuru tarihi: {formatDate(candidate.created_at)}</p>
+      <h2 className="mb-4 text-xl font-semibold text-slate-100">Başvurularım</h2>
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 shadow-sm">
+        <p className="text-sm font-medium text-slate-100">{job.title}</p>
+        {job.department && <p className="text-xs text-slate-500">{job.department}</p>}
+        <p className="mt-2 text-xs text-slate-500">Başvuru tarihi: {formatDate(candidate.created_at)}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <StatusBadge status={latestSession ? latestSession.status : 'pending'} />
+          <StatusBadge status={latestSession ? candidateFacingStatus(latestSession) : 'pending'} />
         </div>
         {nextAction && (
           <button
             onClick={() => navigate(nextAction.to)}
-            className="mt-4 rounded bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700"
+            className="mt-4 rounded bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500"
           >
             {nextAction.label}
           </button>

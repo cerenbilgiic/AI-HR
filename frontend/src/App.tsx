@@ -3,18 +3,21 @@ import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import CandidateProtectedRoute from './components/CandidateProtectedRoute'
 import Login from './pages/hr/Login'
+import AdminLogin from './pages/hr/AdminLogin'
 import Dashboard from './pages/hr/Dashboard'
 import JobPostings from './pages/hr/JobPostings'
 import JobDetail from './pages/hr/JobDetail'
-import CandidateList from './pages/hr/CandidateList'
-import CandidateDetail from './pages/hr/CandidateDetail'
+import CandidateWorkspace from './pages/hr/CandidateWorkspace'
+import CandidateImport from './pages/hr/CandidateImport'
 import InterviewList from './pages/hr/InterviewList'
 import InterviewDetail from './pages/hr/InterviewDetail'
 import Reports from './pages/hr/Reports'
+import AuditLog from './pages/hr/AuditLog'
+import Employees from './pages/hr/Employees'
+import CandidateComparison from './pages/hr/CandidateComparison'
 import HrNotifications from './pages/hr/Notifications'
 import HrProfile from './pages/hr/Profile'
 import HrSettings from './pages/hr/Settings'
-import Invitation from './pages/candidate/Invitation'
 import CandidateLogin from './pages/candidate/CandidateLogin'
 import CandidateHome from './pages/candidate/CandidateHome'
 import MyApplications from './pages/candidate/MyApplications'
@@ -38,20 +41,24 @@ function App() {
           <Route path="/" element={<Navigate to="/hr/login" replace />} />
 
           <Route path="/hr/login" element={<Login />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/hr/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/hr/jobs" element={<ProtectedRoute><JobPostings /></ProtectedRoute>} />
           <Route path="/hr/jobs/:jobId" element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
-          <Route path="/hr/candidates" element={<ProtectedRoute><CandidateList /></ProtectedRoute>} />
-          <Route path="/hr/candidates/:candidateId" element={<ProtectedRoute><CandidateDetail /></ProtectedRoute>} />
+          <Route path="/hr/candidates" element={<ProtectedRoute><CandidateWorkspace /></ProtectedRoute>} />
+          <Route path="/hr/candidates/import" element={<ProtectedRoute><CandidateImport /></ProtectedRoute>} />
+          <Route path="/hr/candidates/:candidateId" element={<ProtectedRoute><CandidateWorkspace /></ProtectedRoute>} />
           <Route path="/hr/interviews" element={<ProtectedRoute><InterviewList /></ProtectedRoute>} />
           <Route path="/hr/interviews/:sessionId" element={<ProtectedRoute><InterviewDetail /></ProtectedRoute>} />
           <Route path="/hr/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+          <Route path="/hr/reports/compare" element={<ProtectedRoute><CandidateComparison /></ProtectedRoute>} />
+          <Route path="/hr/audit-log" element={<ProtectedRoute><AuditLog /></ProtectedRoute>} />
+          <Route path="/hr/employees" element={<ProtectedRoute><Employees /></ProtectedRoute>} />
           <Route path="/hr/notifications" element={<ProtectedRoute><HrNotifications /></ProtectedRoute>} />
           <Route path="/hr/profile" element={<ProtectedRoute><HrProfile /></ProtectedRoute>} />
           <Route path="/hr/settings" element={<ProtectedRoute><HrSettings /></ProtectedRoute>} />
 
           <Route path="/interview/login" element={<CandidateLogin />} />
-          <Route path="/interview/:candidateId" element={<Invitation />} />
           <Route
             path="/interview/:candidateId/home"
             element={<CandidateProtectedRoute><CandidateHome /></CandidateProtectedRoute>}

@@ -317,9 +317,14 @@ def run() -> None:
     try:
         _clear_existing_data(db)
 
+        # Three tiers: hr (day-to-day work, no management screens), hr_manager
+        # (manages hr-role accounts via the Employees screen), admin (manages
+        # everyone incl. other managers, plus the Audit Log — logs in at the
+        # separate /admin/login, not /hr/login).
         hr_role = Role(name="hr")
+        hr_manager_role = Role(name="hr_manager")
         admin_role = Role(name="admin")
-        db.add_all([hr_role, admin_role])
+        db.add_all([hr_role, hr_manager_role, admin_role])
         db.flush()
 
         hr_user = User(
@@ -334,13 +339,19 @@ def run() -> None:
             full_name="Kadir Şen",
             role_id=hr_role.id,
         )
-        admin_user = User(
+        hr_manager_user = User(
             email="admin@retailco.example.com",
             hashed_password=hash_password(SEED_PASSWORD),
             full_name="Mehmet Yıldırım",
+            role_id=hr_manager_role.id,
+        )
+        admin_user = User(
+            email="sysadmin@retailco.example.com",
+            hashed_password=hash_password(SEED_PASSWORD),
+            full_name="Sistem Yöneticisi",
             role_id=admin_role.id,
         )
-        db.add_all([hr_user, hr_user_2, admin_user])
+        db.add_all([hr_user, hr_user_2, hr_manager_user, admin_user])
         db.flush()
 
         candidate_index = 0
@@ -370,6 +381,10 @@ def run() -> None:
                     full_name=full_name,
                     email=f"{_ascii(first)}.{_ascii(last)}@example.com",
                     phone=_phone(candidate_index),
+                    # Seed candidates get a login (assigned, not their
+                    # personal email — see invitation_service.py) up front
+                    # so they're testable without a separate invite step.
+                    login_email=f"{_ascii(first)}.{_ascii(last)}@aday.mulakat.internal",
                     hashed_password=hash_password(SEED_PASSWORD),
                     job_id=job.id,
                     skills=[CandidateSkill(name=name) for name in skill_names],
@@ -420,8 +435,10 @@ def run() -> None:
                     ))
 
         db.commit()
-        print(f"Seeded {len(JOBS)} jobs and {total_candidates} candidates (3 users).")
-        print(f"HR login: hr@retailco.example.com / {SEED_PASSWORD}")
+        print(f"Seeded {len(JOBS)} jobs and {total_candidates} candidates (4 users).")
+        print(f"HR login (/hr/login): hr@retailco.example.com / {SEED_PASSWORD}")
+        print(f"HR manager login (/hr/login): admin@retailco.example.com / {SEED_PASSWORD}")
+        print(f"Admin login (/admin/login): sysadmin@retailco.example.com / {SEED_PASSWORD}")
     finally:
         db.close()
 

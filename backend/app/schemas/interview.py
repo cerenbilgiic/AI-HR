@@ -61,17 +61,34 @@ class InterviewSessionOut(BaseModel):
     # column, see that function for why it's not baked into get_session.
     overall_score: int | None = None
     recommendation: str | None = None
+    # HR's own decision (InterviewReport.hr_decision), distinct from the AI's
+    # `recommendation` above — candidate-facing pages must gate on this being
+    # non-null, never on `recommendation` or on status == "completed" alone.
+    hr_decision: str | None = None
+    # Also populated by attach_report_summary — the report's own created_at,
+    # distinct from the session's, so the dashboard can compute "reports
+    # generated this month vs last month" without an extra request.
+    report_created_at: datetime | None = None
     # Populated by interview_service.attach_completion_stats — see that
     # function for why duration can't just be updated_at - created_at.
     duration_minutes: int | None = None
     answered_count: int | None = None
     questions: list[InterviewQuestionOut] = []
+    # Anti-cheat signal — risk_score is a real column (set at completion,
+    # see interview_service.complete_session/terminate_session);
+    # violation_counts is transient, populated by attach_violation_summary.
+    risk_score: int | None = None
+    violation_counts: dict[str, int] | None = None
 
     model_config = {"from_attributes": True}
 
 
 class InterviewSessionStatusUpdate(BaseModel):
     status: str
+
+
+class InterviewViolationCreate(BaseModel):
+    violation_type: str
 
 
 class AnswerSubmit(BaseModel):

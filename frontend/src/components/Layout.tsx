@@ -1,6 +1,25 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import {
+  Award,
+  Bell,
+  Briefcase,
+  ClipboardList,
+  FileText,
+  History,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Search,
+  Settings as SettingsIcon,
+  User,
+  UserCog,
+  Users,
+  Video,
+} from 'lucide-react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import apiClient, { candidateApiClient } from '../api/client'
+import { useUnreadNotificationCount } from '../hooks/useUnreadNotificationCount'
+import { ROLE_LABELS } from '../utils/roles'
 import type { Candidate } from '../types'
 
 interface HrUser {
@@ -10,32 +29,39 @@ interface HrUser {
   role: string
 }
 
-const HR_ROLE_LABELS: Record<string, string> = {
-  hr: 'HR Manager',
-  admin: 'Administrator',
-}
-
 const HR_SIDEBAR_ITEMS = [
-  { to: '/hr/dashboard', label: 'Dashboard', icon: '📊' },
-  { to: '/hr/candidates', label: 'Candidates', icon: '👥' },
-  { to: '/hr/interviews', label: 'Interviews', icon: '🎥' },
-  { to: '/hr/jobs', label: 'Job Positions', icon: '💼' },
-  { to: '/hr/reports', label: 'Reports', icon: '📈' },
-  { to: '/hr/notifications', label: 'Notifications', icon: '🔔' },
-  { to: '/hr/profile', label: 'My Profile', icon: '👤' },
-  { to: '/hr/settings', label: 'Settings', icon: '⚙️' },
+  { to: '/hr/dashboard', label: 'Kontrol Paneli', icon: LayoutDashboard },
+  { to: '/hr/candidates', label: 'Adaylar', icon: Users },
+  { to: '/hr/interviews', label: 'Mülakatlar', icon: Video },
+  { to: '/hr/jobs', label: 'İş İlanları', icon: Briefcase },
+  { to: '/hr/reports', label: 'Raporlar', icon: FileText },
+  // Backend-enforced too (get_current_admin/get_current_manager) — hidden
+  // here just so an account without the role doesn't see a link that
+  // would 403.
+  { to: '/hr/audit-log', label: 'İşlem Geçmişi', icon: History, roles: ['admin'] },
+  { to: '/hr/employees', label: 'Çalışanlar', icon: UserCog, roles: ['admin', 'hr_manager'] },
+  { to: '/hr/notifications', label: 'Bildirimler', icon: Bell },
+  { to: '/hr/profile', label: 'Profilim', icon: User },
+  { to: '/hr/settings', label: 'Ayarlar', icon: SettingsIcon },
 ]
 
 const CANDIDATE_SIDEBAR_ITEMS = [
-  { suffix: '/home', label: 'Dashboard', icon: '🏠' },
-  { suffix: '/home/applications', label: 'Başvurularım', icon: '📋' },
-  { suffix: '/home/interviews', label: 'Mülakatlarım', icon: '🎥' },
-  { suffix: '/home/completed', label: 'Mülakat Geçmişi', icon: '📜' },
-  { suffix: '/home/results', label: 'Sonuçlarım', icon: '✅' },
-  { suffix: '/home/profile', label: 'Profilim', icon: '👤' },
-  { suffix: '/home/notifications', label: 'Bildirimler', icon: '🔔' },
-  { suffix: '/home/settings', label: 'Ayarlar', icon: '⚙️' },
+  { suffix: '/home', label: 'Dashboard', icon: LayoutDashboard },
+  { suffix: '/home/applications', label: 'Başvurularım', icon: ClipboardList },
+  { suffix: '/home/interviews', label: 'Mülakatlarım', icon: Video },
+  { suffix: '/home/completed', label: 'Mülakat Geçmişi', icon: History },
+  { suffix: '/home/results', label: 'Sonuçlarım', icon: Award },
+  { suffix: '/home/profile', label: 'Profilim', icon: User },
+  { suffix: '/home/notifications', label: 'Bildirimler', icon: Bell },
+  { suffix: '/home/settings', label: 'Ayarlar', icon: SettingsIcon },
 ]
+
+// Shared by both HR and candidate sidebars — same dark look, just different
+// items/targets.
+const NAV_ITEM_CLASSES = ({ isActive }: { isActive: boolean }) =>
+  `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+    isActive ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+  }`
 
 function initialsOf(fullName: string): string {
   return fullName
@@ -50,16 +76,20 @@ export default function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
 
-  // HR (dark sidebar, English) and candidate (light sidebar, Turkish) get
-  // deliberately distinct visual treatments — "visually separate dashboards"
-  // — both driven by the same conditional-on-pathname approach.
   const showHrSidebar = location.pathname.startsWith('/hr') && location.pathname !== '/hr/login'
+  // The candidate workspace is a 3-panel master-detail-detail layout that
+  // needs real horizontal room — every other HR page (tables, forms) reads
+  // better narrower, so only this one gets the wider container.
+  const isWorkspaceRoute =
+    location.pathname === '/hr/candidates' || /^\/hr\/candidates\/\d+$/.test(location.pathname)
   const candidateDashboardMatch = location.pathname.match(/^\/interview\/([^/]+)\/home/)
   const candidateId = candidateDashboardMatch?.[1]
 
   const [candidate, setCandidate] = useState<Candidate | null>(null)
   const [hrUser, setHrUser] = useState<HrUser | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const unreadCount = useUnreadNotificationCount(showHrSidebar)
 
   useEffect(() => {
     if (!candidateId) return
@@ -85,6 +115,20 @@ export default function Layout({ children }: { children: ReactNode }) {
     setMobileNavOpen(false)
   }, [location.pathname])
 
+  // Distinct browser-tab titles per portal — so the three login pages
+  // (admin / İK / aday) are tellable apart when open in separate tabs.
+  useEffect(() => {
+    if (location.pathname.startsWith('/admin')) {
+      document.title = 'AI-HR · Yönetici'
+    } else if (location.pathname.startsWith('/hr')) {
+      document.title = 'AI-HR · İK Paneli'
+    } else if (location.pathname.startsWith('/interview')) {
+      document.title = 'AI-HR · Aday Paneli'
+    } else {
+      document.title = 'AI-HR'
+    }
+  }, [location.pathname])
+
   function handleCandidateLogout() {
     localStorage.removeItem('candidate_access_token')
     navigate('/interview/login')
@@ -95,15 +139,20 @@ export default function Layout({ children }: { children: ReactNode }) {
     navigate('/hr/login')
   }
 
+  function handleSearchSubmit(e: FormEvent) {
+    e.preventDefault()
+    navigate(`/hr/candidates${searchQuery.trim() ? `?q=${encodeURIComponent(searchQuery.trim())}` : ''}`)
+  }
+
   function candidateNav(onNavigate?: () => void) {
     return (
       <>
         {candidate && (
-          <div className="mb-4 flex items-center gap-2 border-b border-gray-100 pb-4">
+          <div className="mb-4 flex items-center gap-2 border-b border-slate-800 pb-4">
             <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">
               {initialsOf(candidate.full_name)}
             </span>
-            <span className="truncate text-sm font-medium text-gray-900">{candidate.full_name}</span>
+            <span className="truncate text-sm font-medium text-slate-100">{candidate.full_name}</span>
           </div>
         )}
         <nav className="space-y-1">
@@ -113,24 +162,20 @@ export default function Layout({ children }: { children: ReactNode }) {
               to={`/interview/${candidateId}${item.suffix}`}
               end={item.suffix === '/home'}
               onClick={onNavigate}
-              className={({ isActive }) =>
-                `block rounded px-3 py-2 text-sm font-medium ${
-                  isActive ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-                }`
-              }
+              className={NAV_ITEM_CLASSES}
             >
-              <span className="mr-2">{item.icon}</span>
+              <item.icon className="h-4 w-4 flex-shrink-0" />
               {item.label}
             </NavLink>
           ))}
         </nav>
-        <div className="mt-4 border-t border-gray-100 pt-4">
+        <div className="mt-4 border-t border-slate-800 pt-4">
           <button
             type="button"
             onClick={handleCandidateLogout}
-            className="block w-full rounded px-3 py-2 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-100"
           >
-            <span className="mr-2">🚪</span>
+            <LogOut className="h-4 w-4 flex-shrink-0" />
             Çıkış Yap
           </button>
         </div>
@@ -142,41 +187,32 @@ export default function Layout({ children }: { children: ReactNode }) {
     return (
       <>
         {hrUser && (
-          <div className="mb-4 flex items-center gap-2 border-b border-slate-700 pb-4">
-            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-indigo-500 text-sm font-semibold text-white">
+          <div className="mb-4 flex items-center gap-2 border-b border-slate-800 pb-4">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">
               {initialsOf(hrUser.full_name)}
             </span>
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-white">{hrUser.full_name}</p>
-              <p className="truncate text-xs text-slate-400">{HR_ROLE_LABELS[hrUser.role] ?? hrUser.role}</p>
+              <p className="truncate text-sm font-medium text-slate-100">{hrUser.full_name}</p>
+              <p className="truncate text-xs text-slate-500">{ROLE_LABELS[hrUser.role] ?? hrUser.role}</p>
             </div>
           </div>
         )}
         <nav className="space-y-1">
-          {HR_SIDEBAR_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                `block rounded px-3 py-2 text-sm font-medium ${
-                  isActive ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-                }`
-              }
-            >
-              <span className="mr-2">{item.icon}</span>
+          {HR_SIDEBAR_ITEMS.filter((item) => !item.roles || item.roles.includes(hrUser?.role ?? '')).map((item) => (
+            <NavLink key={item.to} to={item.to} onClick={onNavigate} className={NAV_ITEM_CLASSES}>
+              <item.icon className="h-4 w-4 flex-shrink-0" />
               {item.label}
             </NavLink>
           ))}
         </nav>
-        <div className="mt-4 border-t border-slate-700 pt-4">
+        <div className="mt-4 border-t border-slate-800 pt-4">
           <button
             type="button"
             onClick={handleHrLogout}
-            className="block w-full rounded px-3 py-2 text-left text-sm font-medium text-red-400 hover:bg-slate-800"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-100"
           >
-            <span className="mr-2">🚪</span>
-            Logout
+            <LogOut className="h-4 w-4 flex-shrink-0" />
+            Çıkış Yap
           </button>
         </div>
       </>
@@ -186,23 +222,51 @@ export default function Layout({ children }: { children: ReactNode }) {
   const sidebarActive = Boolean(candidateId) || showHrSidebar
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-indigo-50/60 via-gray-50 to-gray-50">
-      <header className="border-b border-gray-200 bg-white/80 px-6 py-4 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-2">
+    <div className="min-h-screen bg-slate-950">
+      <header className="border-b border-slate-800 bg-slate-900 px-6 py-4">
+        <div className={`mx-auto flex items-center gap-4 ${showHrSidebar ? 'max-w-6xl' : 'max-w-5xl'}`}>
           {sidebarActive && (
             <button
               type="button"
               onClick={() => setMobileNavOpen(true)}
-              className="mr-1 rounded p-1 text-gray-600 hover:bg-gray-100 md:hidden"
-              aria-label={candidateId ? 'Menüyü aç' : 'Open menu'}
+              className="rounded p-1 text-slate-300 hover:bg-slate-800 md:hidden"
+              aria-label="Menüyü aç"
             >
-              ☰
+              <Menu className="h-5 w-5" />
             </button>
           )}
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
+          <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
             AI
           </span>
-          <h1 className="text-lg font-semibold text-gray-900">AI-HR</h1>
+          <h1 className="text-lg font-semibold text-slate-100">AI-HR</h1>
+
+          {showHrSidebar && (
+            <div className="ml-auto flex items-center gap-3">
+              <form onSubmit={handleSearchSubmit} className="relative hidden sm:block">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Aday ara..."
+                  className="w-52 rounded-lg border border-slate-700 bg-slate-800 py-1.5 pl-8 pr-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </form>
+              <button
+                type="button"
+                onClick={() => navigate('/hr/notifications')}
+                className="relative rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                aria-label="Bildirimler"
+              >
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </header>
       {candidateId ? (
@@ -212,7 +276,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           {mobileNavOpen && (
             <div className="fixed inset-0 z-50 md:hidden">
               <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
-              <div className="absolute left-0 top-0 h-full w-64 overflow-y-auto bg-white p-4 shadow-lg">
+              <div className="absolute left-0 top-0 h-full w-64 overflow-y-auto bg-slate-900 p-4 shadow-lg">
                 {candidateNav(() => setMobileNavOpen(false))}
               </div>
             </div>
@@ -221,8 +285,8 @@ export default function Layout({ children }: { children: ReactNode }) {
           <main className="min-w-0 flex-1">{children}</main>
         </div>
       ) : showHrSidebar ? (
-        <div className="mx-auto flex max-w-6xl gap-6 px-6 py-8">
-          <aside className="hidden w-60 flex-shrink-0 rounded-xl bg-slate-900 p-4 md:block">{hrNav()}</aside>
+        <div className={`mx-auto flex gap-6 px-6 py-8 ${isWorkspaceRoute ? 'max-w-[1680px]' : 'max-w-6xl'}`}>
+          <aside className="hidden w-56 flex-shrink-0 md:block">{hrNav()}</aside>
 
           {mobileNavOpen && (
             <div className="fixed inset-0 z-50 md:hidden">

@@ -19,6 +19,8 @@ const MAX_ANSWER_WORDS = 500
 const INTRO_TEXT =
   'Merhaba, ben yapay zeka mülakat asistanınızım. Sorulara sözlü olarak cevap verebilirsiniz, ' +
   'ancak cevabınızı yazılı olarak da yazmanız sizin için bir güvence olacaktır. ' +
+  'Başlamadan önce önemli bir uyarı: mülakat sırasında ekrandan çıkar veya başka bir sekmeye ' +
+  'ya da uygulamaya geçerseniz, mülakat otomatik olarak sonlandırılacaktır ve tekrar giremezsiniz. ' +
   'Şimdi size birkaç soru soracağım.'
 const FINISH_TEXT =
   'Tebrikler, mülakatınızı başarıyla tamamladınız. Cevaplarınız kaydedildi, katılımınız için teşekkür ederiz.'
@@ -38,12 +40,12 @@ function looksLikeGibberishToken(token: string): boolean {
 
 function validateAnswerText(text: string): string | null {
   const words = text.trim().split(/\s+/).filter(Boolean)
-  if (words.length > MAX_ANSWER_WORDS) return `Answers are limited to ${MAX_ANSWER_WORDS} words.`
+  if (words.length > MAX_ANSWER_WORDS) return `Cevaplar en fazla ${MAX_ANSWER_WORDS} kelime olabilir.`
   const longTokens = words.filter((w) => w.length >= 4)
   if (longTokens.length > 0) {
     const gibberishCount = longTokens.filter(looksLikeGibberishToken).length
     if (gibberishCount / longTokens.length >= 0.5) {
-      return "This doesn't look like a real answer. Please rewrite it."
+      return 'Bu gerçek bir cevap gibi görünmüyor. Lütfen tekrar yazın.'
     }
   }
   return null
@@ -65,7 +67,6 @@ export default function Interview() {
   const [answer, setAnswer] = useState('')
   const [finished, setFinished] = useState(false)
   const [terminated, setTerminated] = useState(false)
-  const [showLeaveWarning, setShowLeaveWarning] = useState(false)
   const [showFinishConfirm, setShowFinishConfirm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [timeLeft, setTimeLeft] = useState(QUESTION_SECONDS)
@@ -77,11 +78,6 @@ export default function Interview() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timeUpFiredRef = useRef(false)
-  // How many times the candidate has switched away from this tab/app during
-  // the interview — first time warns, second time ends it (see the
-  // visibilitychange effect below). A ref, not state: the count itself
-  // never needs to trigger a re-render on its own.
-  const leaveCountRef = useRef(0)
 
   // Track where in the continuous recording each answer's verbal response
   // starts/ends, so the backend can slice just that audio out for
@@ -116,23 +112,33 @@ export default function Interview() {
   // Detects the candidate switching to another tab/app mid-interview.
   // visibilitychange (not window.blur) is deliberate — blur also fires for
   // in-page focus changes (a permission prompt, browser chrome) that aren't
-  // actually leaving the page. First offense warns; second ends it for good
-  // (terminateSession, defined below — hoisted, same pattern as submitAnswer
-  // already being referenced from an earlier effect in this file).
+  // actually leaving the page. The candidate is warned about this up front
+  // (see INTRO_TEXT, spoken at interview start) — the very first offense
+  // ends the interview immediately, no second-chance warning.
   useEffect(() => {
     if (!session || finished || terminated) return
     function handleVisibilityChange() {
       if (document.visibilityState !== 'visible') {
-        leaveCountRef.current += 1
-        if (leaveCountRef.current >= 2) {
-          void terminateSession()
-        } else {
-          setShowLeaveWarning(true)
-        }
+        logViolation('tab_switch')
+        void terminateSession()
       }
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [session, finished, terminated])
+
+  // Exiting fullscreen counts the same as switching tabs — immediate
+  // termination on first offense, same as above.
+  useEffect(() => {
+    if (!session || finished || terminated) return
+    function handleFullscreenChange() {
+      if (!document.fullscreenElement) {
+        logViolation('fullscreen_exit')
+        void terminateSession()
+      }
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [session, finished, terminated])
 
   useEffect(() => {
@@ -190,7 +196,7 @@ export default function Interview() {
       }
       startContinuousRecording()
     } catch {
-      setError('Could not access your camera/microphone. You can still type your answers.')
+      setError('Kamera/mikrofonunuza erişilemedi. Cevaplarınızı yine de yazarak verebilirsiniz.')
     }
   }
 
@@ -232,7 +238,7 @@ export default function Interview() {
       await candidateApiClient.post(`/interviews/${session.id}/recording`, formData)
     } catch {
       // Best-effort — the candidate's answers are already saved either way.
-      setError('Your answers were saved, but the recording could not be uploaded.')
+      setError('Cevaplarınız kaydedildi, ancak video kaydı yüklenemedi.')
     }
   }
 
@@ -257,10 +263,21 @@ export default function Interview() {
     streamRef.current?.getTracks().forEach((track) => track.stop())
   }
 
-  // The candidate switched tabs/apps a second time — end the interview for
-  // good (distinct "terminated" state, unlike finishInterview's normal
-  // "awaiting_review"). Best-effort: they're leaving the active screen
-  // regardless of whether this call succeeds.
+  // Fire-and-forget — the candidate's own experience (warning/termination)
+  // never waits on this; it's purely for the HR review screen's Integrity
+  // card (see interview_service.attach_violation_summary).
+  function logViolation(violationType: string) {
+    if (!session) return
+    void candidateApiClient
+      .post(`/interviews/${session.id}/violations`, { violation_type: violationType })
+      .catch(() => {})
+  }
+
+  // The candidate left the tab/app or exited fullscreen — end the interview
+  // immediately for good (distinct "terminated" state, unlike
+  // finishInterview's normal "awaiting_review"). They were warned about
+  // this up front (INTRO_TEXT). Best-effort: they're leaving the active
+  // screen regardless of whether this call succeeds.
   async function terminateSession() {
     if (!session) return
     stop()
@@ -270,7 +287,6 @@ export default function Interview() {
       // Ignored — see comment above.
     }
     streamRef.current?.getTracks().forEach((track) => track.stop())
-    setShowLeaveWarning(false)
     setTerminated(true)
   }
 
@@ -283,9 +299,15 @@ export default function Interview() {
       setSession(data)
       setCurrentIndex(0)
       await setupCamera()
+      try {
+        await document.documentElement.requestFullscreen()
+      } catch {
+        // Non-fatal — some browsers/contexts (e.g. embedded iframes without
+        // the fullscreen permission) reject this; the interview still works.
+      }
     } catch (err) {
       const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
-      setError(typeof detail === 'string' ? detail : 'Could not start the interview. Please try again.')
+      setError(typeof detail === 'string' ? detail : 'Mülakat başlatılamadı. Lütfen tekrar deneyin.')
     } finally {
       setStarting(false)
     }
@@ -331,7 +353,7 @@ export default function Interview() {
       }
     } catch (err) {
       const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
-      setError(typeof detail === 'string' ? detail : 'Something went wrong submitting your answer. Please try again.')
+      setError(typeof detail === 'string' ? detail : 'Cevabınız gönderilirken bir sorun oluştu. Lütfen tekrar deneyin.')
     } finally {
       setSubmitting(false)
     }
@@ -340,40 +362,45 @@ export default function Interview() {
   if (!session) {
     return (
       <div className="mx-auto max-w-lg">
-        <div className="rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-8 text-center shadow-sm">
           <div className="mb-4 flex justify-center">
             <AIAvatar speaking={false} gender={avatarGender} />
           </div>
-          <h2 className="mb-2 text-xl font-semibold text-gray-900">Ready when you are</h2>
-          <p className="mb-6 text-sm text-gray-600">
-            Your AI interviewer will greet you, walk you through each question out loud, and you can
-            answer by speaking, typing, or both. Take a breath — there's no rush.
+          <h2 className="mb-2 text-xl font-semibold text-slate-100">Hazır olduğunuzda başlayabiliriz</h2>
+          <p className="mb-6 text-sm text-slate-400">
+            Yapay zeka mülakat asistanınız sizi karşılayacak, her soruyu sesli olarak yöneltecek ve
+            cevaplarınızı konuşarak, yazarak ya da ikisini birlikte kullanarak verebilirsiniz.
+            Rahat olun — acele etmenize gerek yok.
           </p>
           {applyingJob && (
-            <div className="mb-6 rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-left">
-              <p className="text-xs uppercase tracking-wide text-indigo-600">Applying for</p>
-              <p className="mb-2 font-medium text-gray-900">{applyingJob.title}</p>
+            <div className="mb-6 rounded-lg border border-slate-800 bg-slate-800 p-4 text-left">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Başvurduğunuz pozisyon</p>
+              <p className="mb-2 font-medium text-slate-100">{applyingJob.title}</p>
               {applyingJob.skills.length > 0 && (
                 <>
-                  <p className="text-xs uppercase tracking-wide text-indigo-600">This interview will assess</p>
-                  <p className="text-sm text-gray-700">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Bu mülakat şunları değerlendirecek</p>
+                  <p className="text-sm text-slate-300">
                     {applyingJob.skills.map((s) => s.name).join(', ')}
                   </p>
                 </>
               )}
             </div>
           )}
+          <p className="mb-4 text-xs font-medium text-slate-300">
+            ⚠ Mülakat sırasında ekrandan çıkar veya başka bir sekmeye/uygulamaya geçerseniz, mülakat
+            otomatik olarak sonlandırılır ve tekrar giremezsiniz.
+          </p>
           <button
             onClick={start}
             disabled={starting}
-            className="w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 disabled:opacity-40"
+            className="w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500 disabled:opacity-40"
           >
-            {starting ? 'Preparing your questions…' : 'Start interview'}
+            {starting ? 'Sorularınız hazırlanıyor…' : 'Mülakatı başlat'}
           </button>
           {starting && (
-            <p className="mt-2 text-xs text-gray-500">This can take up to a minute the first time.</p>
+            <p className="mt-2 text-xs text-slate-500">İlk seferinde bu işlem bir dakika kadar sürebilir.</p>
           )}
-          {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+          {error && <p className="mt-2 text-sm font-medium text-rose-400">{error}</p>}
         </div>
       </div>
     )
@@ -382,11 +409,12 @@ export default function Interview() {
   if (terminated) {
     return (
       <div className="mx-auto max-w-lg">
-        <div className="rounded-xl border border-red-200 bg-red-50 p-8 text-center shadow-sm">
-          <p className="mb-1 text-lg font-semibold text-red-800">Mülakatınız sonlandırıldı</p>
-          <p className="text-sm text-red-700">
-            Mülakat sırasında başka bir sekmeye veya uygulamaya geçtiğiniz için mülakatınız
-            sonlandırılmıştır. Bu mülakata tekrar giremezsiniz.
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-8 text-center shadow-sm">
+          <p className="mb-1 text-lg font-semibold text-rose-300">Mülakatınız sonlandırıldı</p>
+          <p className="text-sm text-rose-100/80">
+            Mülakat sırasında ekrandan ayrıldığınız (başka bir sekmeye/uygulamaya geçtiğiniz veya
+            tam ekrandan çıktığınız) için mülakatınız sonlandırılmıştır. Bu mülakata tekrar
+            giremezsiniz.
           </p>
         </div>
       </div>
@@ -396,22 +424,22 @@ export default function Interview() {
   if (finished) {
     return (
       <div className="mx-auto max-w-lg">
-        <div className="rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-8 text-center shadow-sm">
           <div className="mb-4 flex justify-center">
             <AIAvatar speaking={speaking} gender={avatarGender} />
           </div>
-          <h2 className="mb-2 text-xl font-semibold text-gray-900">Mülakat Tamamlandı 🎉</h2>
-          <p className="text-gray-900">{FINISH_TEXT}</p>
-          <div className="mx-auto mt-4 inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">
+          <h2 className="mb-2 text-xl font-semibold text-slate-100">Mülakat Tamamlandı 🎉</h2>
+          <p className="text-slate-100">{FINISH_TEXT}</p>
+          <div className="mx-auto mt-4 inline-block rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-400">
             Durum: Değerlendiriliyor
           </div>
-          <p className="mt-4 text-sm text-gray-600">
+          <p className="mt-4 text-sm text-slate-400">
             İşe alım ekibimiz başvurunuzu inceleyecek ve sonraki adımlar hakkında sizinle iletişime
             geçecektir.
           </p>
           <button
             onClick={() => navigate(`/interview/${candidateId}/home`)}
-            className="mt-6 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700"
+            className="mt-6 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500"
           >
             Panele Dön
           </button>
@@ -421,37 +449,33 @@ export default function Interview() {
   }
 
   return (
-    <div className="mx-auto max-w-lg">
-      {showLeaveWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-w-sm rounded-xl bg-white p-6 text-center shadow-lg">
-            <p className="mb-2 text-lg font-semibold text-red-700">Sekme/uygulama değişikliği algılandı</p>
-            <p className="mb-4 text-sm text-gray-700">
-              Mülakat sırasında başka bir sekmeye veya uygulamaya geçtiniz. Bunu bir daha yaparsanız
-              mülakatınız sonlandırılacak ve tekrar giremeyeceksiniz.
-            </p>
-            <button
-              onClick={() => setShowLeaveWarning(false)}
-              className="w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700"
-            >
-              Anladım, devam et
-            </button>
-          </div>
-        </div>
-      )}
-
+    <div
+      className="mx-auto max-w-lg"
+      onCopy={(e) => {
+        e.preventDefault()
+        logViolation('copy_attempt')
+      }}
+      onPaste={(e) => {
+        e.preventDefault()
+        logViolation('paste_attempt')
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        logViolation('right_click')
+      }}
+    >
       {showFinishConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-w-sm rounded-xl bg-white p-6 text-center shadow-lg">
-            <p className="mb-2 text-lg font-semibold text-gray-900">Mülakatı bitir</p>
-            <p className="mb-4 text-sm text-gray-700">
+          <div className="max-w-sm rounded-xl bg-slate-900 p-6 text-center shadow-lg">
+            <p className="mb-2 text-lg font-semibold text-slate-100">Mülakatı bitir</p>
+            <p className="mb-4 text-sm text-slate-300">
               Mülakatı şimdi bitirmek istediğinize emin misiniz? Cevaplanmamış sorular boş bırakılmış
               sayılacaktır.
             </p>
             <div className="flex gap-2">
               <button
                 onClick={() => setShowFinishConfirm(false)}
-                className="w-full rounded border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50"
+                className="w-full rounded border border-slate-700 px-4 py-2 text-slate-300 hover:bg-slate-800"
               >
                 Vazgeç
               </button>
@@ -460,7 +484,7 @@ export default function Interview() {
                   setShowFinishConfirm(false)
                   void finishInterview()
                 }}
-                className="w-full rounded bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+                className="w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500"
               >
                 Evet, bitir
               </button>
@@ -473,7 +497,7 @@ export default function Interview() {
         <button
           type="button"
           onClick={() => setShowFinishConfirm(true)}
-          className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+          className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:bg-slate-800"
         >
           Mülakatı Bitir
         </button>
@@ -482,8 +506,8 @@ export default function Interview() {
       <div className="mb-4 flex items-start gap-4">
         <div className="flex flex-col items-center gap-1">
           <AIAvatar speaking={speaking} gender={avatarGender} size="lg" />
-          <span className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
-            AI Interviewer
+          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+            AI Mülakat Asistanı
           </span>
         </div>
         <div className="relative flex-shrink-0">
@@ -492,17 +516,17 @@ export default function Interview() {
             autoPlay
             muted
             playsInline
-            className="aspect-video w-64 rounded border border-gray-300 bg-gray-900 object-cover"
+            className="aspect-video w-64 rounded border border-slate-700 bg-slate-900 object-cover"
           />
           <span className="absolute left-1 top-1 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
-            <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-            Recording
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
+            Kayıt
           </span>
         </div>
       </div>
 
       <div className="mb-4">
-        <div className="mb-1 flex items-center justify-between text-xs text-gray-500">
+        <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
           <span>
             Soru {currentIndex + 1} / {session.questions.length}
           </span>
@@ -514,7 +538,7 @@ export default function Interview() {
           {session.questions.map((q, i) => (
             <span
               key={q.id}
-              className={`h-1.5 flex-1 rounded-full ${i <= currentIndex ? 'bg-indigo-600' : 'bg-gray-200'}`}
+              className={`h-1.5 flex-1 rounded-full ${i <= currentIndex ? 'bg-indigo-500' : 'bg-slate-700'}`}
             />
           ))}
         </div>
@@ -522,12 +546,12 @@ export default function Interview() {
 
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <p className={`font-mono text-2xl ${timeLeft <= 15 ? 'text-red-600' : 'text-gray-900'}`}>
+          <p className={`font-mono text-2xl text-slate-100 ${timeLeft <= 15 ? 'font-bold' : ''}`}>
             {formatTime(timeLeft)}
           </p>
-          <p className="text-xs text-gray-500">Time left for this question</p>
+          <p className="text-xs text-slate-500">Bu soru için kalan süre</p>
           {canSpeakNow && !speaking && (
-            <p className="mt-1 text-xs font-medium text-green-600">
+            <p className="mt-1 text-xs font-medium text-slate-100">
               🎤 Şimdi cevabınızı söyleyebilirsiniz
             </p>
           )}
@@ -536,33 +560,33 @@ export default function Interview() {
           <button
             type="button"
             onClick={() => question && speak(question.text)}
-            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
           >
-            🔊 Replay
+            🔊 Tekrar Oynat
           </button>
           <button
             type="button"
             onClick={() => setMuted((m) => !m)}
-            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
           >
-            {muted ? '🔇 Unmute' : '🔈 Mute'}
+            {muted ? '🔇 Sesi Aç' : '🔈 Sessize Al'}
           </button>
         </div>
       </div>
 
-      <div className="mb-4 rounded-xl border border-indigo-100 bg-white p-4 shadow-sm">
-        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">
-          Question {currentIndex + 1} of {session.questions.length}
+      <div className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-4 shadow-sm">
+        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+          Soru {currentIndex + 1} / {session.questions.length}
         </p>
-        <h2 className="text-lg font-medium text-gray-900">{question?.text}</h2>
+        <h2 className="text-lg font-medium text-slate-100">{question?.text}</h2>
       </div>
 
-      <div className="mb-3 flex gap-1 rounded-lg bg-gray-100 p-1 text-sm">
+      <div className="mb-3 flex gap-1 rounded-lg bg-slate-800 p-1 text-sm">
         <button
           type="button"
           onClick={() => setAnswerMode('voice')}
           className={`flex-1 rounded-md py-1.5 font-medium ${
-            answerMode === 'voice' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+            answerMode === 'voice' ? 'bg-slate-700 text-slate-100 shadow-sm' : 'text-slate-500'
           }`}
         >
           🎙️ Sesli
@@ -571,7 +595,7 @@ export default function Interview() {
           type="button"
           onClick={() => setAnswerMode('written')}
           className={`flex-1 rounded-md py-1.5 font-medium ${
-            answerMode === 'written' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+            answerMode === 'written' ? 'bg-slate-700 text-slate-100 shadow-sm' : 'text-slate-500'
           }`}
         >
           📝 Yazılı
@@ -583,7 +607,7 @@ export default function Interview() {
           verbal-only answer still works fine in Written mode too (both
           submit through the same flow), this is purely a UI affordance. */}
       {answerMode === 'voice' ? (
-        <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-6 text-center text-sm text-gray-600">
+        <div className="rounded-xl border border-dashed border-slate-700 bg-slate-800 p-6 text-center text-sm text-slate-400">
           {canSpeakNow && !speaking
             ? '🎤 Cevabınızı sözlü olarak verebilirsiniz.'
             : 'AI sorusunu bitirdiğinde cevap vermeye başlayabilirsiniz.'}
@@ -595,25 +619,25 @@ export default function Interview() {
             onChange={(e) => setAnswer(e.target.value)}
             rows={6}
             disabled={submitting}
-            className="w-full rounded border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
-            placeholder="Type your answer here"
+            className="w-full rounded border border-slate-700 bg-slate-800 text-slate-200 placeholder:text-slate-500 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
+            placeholder="Cevabınızı buraya yazın"
           />
-          <p className={`mt-1 text-right text-xs ${wordCount > MAX_ANSWER_WORDS ? 'text-red-600' : 'text-gray-500'}`}>
-            {wordCount} / {MAX_ANSWER_WORDS} words
+          <p className={`mt-1 text-right text-xs ${wordCount > MAX_ANSWER_WORDS ? 'font-medium text-slate-100' : 'text-slate-500'}`}>
+            {wordCount} / {MAX_ANSWER_WORDS} kelime
           </p>
         </>
       )}
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-sm font-medium text-rose-400">{error}</p>}
       <button
         onClick={() => void submitAnswer()}
         disabled={submitting || wordCount > MAX_ANSWER_WORDS}
-        className="mt-4 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 disabled:opacity-40"
+        className="mt-4 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500 disabled:opacity-40"
       >
         {submitting
-          ? 'Saving your answer…'
+          ? 'Cevabınız kaydediliyor…'
           : currentIndex + 1 < session.questions.length
-            ? 'Next question'
-            : 'Finish interview'}
+            ? 'Sonraki soru'
+            : 'Mülakatı bitir'}
       </button>
     </div>
   )

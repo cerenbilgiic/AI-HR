@@ -1,4 +1,5 @@
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.ai_score import InterviewReport
@@ -13,8 +14,8 @@ from app.services.interview_service import _format_required_skills
 
 
 def _format_candidate_profile(candidate: Candidate) -> str:
-    skills = ", ".join(s.name for s in candidate.skills) if candidate.skills else "Not specified"
-    return f"Name: {candidate.full_name}\nDeclared skills: {skills}"
+    skills = ", ".join(s.name for s in candidate.skills) if candidate.skills else "Belirtilmemiş"
+    return f"Ad Soyad: {candidate.full_name}\nBeyan edilen beceriler: {skills}"
 
 
 def _format_questions_and_answers(session: InterviewSession) -> str:
@@ -22,9 +23,9 @@ def _format_questions_and_answers(session: InterviewSession) -> str:
     blocks = []
     for question in sorted(session.questions, key=lambda q: q.order):
         answer = answers_by_question.get(question.id)
-        transcript = (answer.transcript if answer else None) or "(No answer provided)"
-        blocks.append(f"Q{question.order + 1}: {question.text}\nA{question.order + 1}: {transcript}")
-    return "\n\n".join(blocks) if blocks else "No questions were recorded for this interview."
+        transcript = (answer.transcript if answer else None) or "(Cevap verilmedi)"
+        blocks.append(f"S{question.order + 1}: {question.text}\nC{question.order + 1}: {transcript}")
+    return "\n\n".join(blocks) if blocks else "Bu mülakat için kayıtlı soru bulunmuyor."
 
 
 def _format_answer_evaluations(db: Session, answers: list[CandidateAnswer]) -> str:
@@ -34,13 +35,13 @@ def _format_answer_evaluations(db: Session, answers: list[CandidateAnswer]) -> s
     # commonly empty, which is fine: the prompt says not to invent evidence.
     answer_ids = [a.id for a in answers]
     if not answer_ids:
-        return "No prior AI evaluations are available for this interview."
+        return "Bu mülakat için önceki bir yapay zekâ değerlendirmesi bulunmuyor."
     evaluations = db.query(AIEvaluation).filter(AIEvaluation.answer_id.in_(answer_ids)).all()
     if not evaluations:
-        return "No prior AI evaluations are available for this interview."
+        return "Bu mülakat için önceki bir yapay zekâ değerlendirmesi bulunmuyor."
     lines = [
-        f"- Competency: {e.competency or 'N/A'}; Score: {e.score if e.score is not None else 'N/A'}; "
-        f"Feedback: {e.feedback or 'N/A'}"
+        f"- Yetkinlik: {e.competency or 'Belirtilmemiş'}; Puan: {e.score if e.score is not None else 'Belirtilmemiş'}; "
+        f"Geri bildirim: {e.feedback or 'Belirtilmemiş'}"
         for e in evaluations
     ]
     return "\n".join(lines)
@@ -65,8 +66,8 @@ def generate_final_report(db: Session, session_id: int) -> InterviewReport:
     raw = get_ai_provider().generate_final_report(
         job_description=job.description if job else "",
         required_skills=_format_required_skills(job),
-        candidate_profile=_format_candidate_profile(candidate) if candidate else "Not specified",
-        candidate_cv=(candidate.cvs[-1].parsed_text if candidate and candidate.cvs else "") or "Not provided",
+        candidate_profile=_format_candidate_profile(candidate) if candidate else "Belirtilmemiş",
+        candidate_cv=(candidate.cvs[-1].parsed_text if candidate and candidate.cvs else "") or "Sunulmadı",
         questions_and_answers=_format_questions_and_answers(session),
         answer_evaluations=_format_answer_evaluations(db, session.answers),
     )
@@ -75,6 +76,17 @@ def generate_final_report(db: Session, session_id: int) -> InterviewReport:
         validated = FinalReportLLMResponse.model_validate(raw)
     except ValidationError as exc:
         raise AIResponseError(f"Model returned an invalid report: {exc}") from exc
+
+    # Re-check right before writing — the AI call above can take a minute or
+    # more, long enough for a concurrent request (e.g. HR re-clicking
+    # "Evaluate" after the first click seemed to hang) to have already
+    # created the report while this request was still generating. Falls
+    # back to the interview_reports.session_id unique constraint as the
+    # final guard below in case both requests still race past this check.
+    if existing is None:
+        existing = db.query(InterviewReport).filter(InterviewReport.session_id == session_id).first()
+    if existing is not None and existing.competency_scores is not None:
+        return existing
 
     report = existing or InterviewReport(session_id=session_id)
     report.summary = validated.summary
@@ -87,6 +99,17 @@ def generate_final_report(db: Session, session_id: int) -> InterviewReport:
     session.status = "completed"
 
     db.add(report)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost the race to a concurrent request that committed first —
+        # discard this generation and hand back whatever it produced.
+        db.rollback()
+        winner = db.query(InterviewReport).filter(InterviewReport.session_id == session_id).first()
+        if winner is None:
+            raise
+        session.status = "completed"
+        db.commit()
+        return winner
     db.refresh(report)
     return report

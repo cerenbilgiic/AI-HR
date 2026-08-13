@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -22,9 +24,16 @@ def login(data: LoginRequest, db: Session = Depends(get_db)) -> Token:
 
 @router.post("/candidate-login", response_model=Token)
 def candidate_login(data: LoginRequest, db: Session = Depends(get_db)) -> Token:
-    candidate = db.query(Candidate).filter(Candidate.email == data.email).first()
+    """Candidates authenticate with the system-assigned login_email only
+    (see invitation_service.issue_credentials) — their personal email
+    (Candidate.email) is never a valid login credential, by design."""
+    candidate = db.query(Candidate).filter(Candidate.login_email == data.email).first()
     if not candidate or not candidate.hashed_password or not verify_password(data.password, candidate.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    if candidate.first_login_at is None:
+        candidate.first_login_at = datetime.now(timezone.utc)
+        db.commit()
 
     token = create_access_token(subject=str(candidate.id), token_type="candidate")
     return Token(access_token=token, candidate_id=candidate.id)

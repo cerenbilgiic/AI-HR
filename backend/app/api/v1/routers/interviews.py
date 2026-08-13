@@ -19,6 +19,7 @@ from app.schemas.interview import (
     InterviewQuestionUpdate,
     InterviewSessionOut,
     InterviewSessionStatusUpdate,
+    InterviewViolationCreate,
 )
 from app.schemas.ai import AIMediaUrlResponse
 from app.schemas.report import InterviewReportOut
@@ -94,6 +95,7 @@ def get_session(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this session")
     interview_service.attach_report_summary(db, [session])
     interview_service.attach_completion_stats(db, [session])
+    interview_service.attach_violation_summary(db, [session])
     return session
 
 
@@ -223,6 +225,22 @@ def terminate_session(
         return interview_service.terminate_session(db, session)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/{session_id}/violations", status_code=status.HTTP_204_NO_CONTENT)
+def log_violation(
+    session_id: int,
+    data: InterviewViolationCreate,
+    db: Session = Depends(get_db),
+    current_candidate: Candidate = Depends(get_current_candidate),
+) -> None:
+    """Candidate-facing, fire-and-forget from the frontend's anti-cheat
+    handlers (tab switch, fullscreen exit, blocked copy/paste) — see
+    pages/candidate/Interview.tsx. Feeds the HR review screen's Integrity
+    card (interview_service.attach_violation_summary) and the session's
+    risk_score at completion."""
+    session = _get_owned_session(db, session_id, current_candidate)
+    interview_service.log_violation(db, session, data.violation_type)
 
 
 @router.post("/{session_id}/evaluate", response_model=InterviewReportOut)

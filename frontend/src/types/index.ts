@@ -16,8 +16,25 @@ export interface Job {
   description: string
   department: string | null
   location: string | null
+  created_by_id: number
+  created_by_name: string | null
   skills: JobSkill[]
   questions: JobQuestionItem[]
+}
+
+export interface JobTransferRequest {
+  id: number
+  job_id: number
+  job_title: string
+  from_user_id: number
+  from_user_name: string | null
+  to_user_id: number
+  to_user_name: string | null
+  requested_by_id: number
+  requested_by_name: string | null
+  status: string
+  created_at: string
+  responded_at: string | null
 }
 
 export interface Candidate {
@@ -27,6 +44,9 @@ export interface Candidate {
   phone: string | null
   job_id: number
   created_at: string
+  login_email: string | null
+  invited_at: string | null
+  first_login_at: string | null
 }
 
 export interface CandidateCV {
@@ -83,9 +103,35 @@ export interface InterviewSession {
   recording_path: string | null
   overall_score: number | null
   recommendation: string | null
+  hr_decision: string | null
+  report_created_at: string | null
   duration_minutes: number | null
   answered_count: number | null
   questions: InterviewQuestion[]
+  risk_score: number | null
+  violation_counts: Record<string, number> | null
+}
+
+export interface InvitationOut {
+  candidate_id: number
+  login_email: string
+  password: string
+}
+
+export interface ImportRowError {
+  row: number
+  message: string
+}
+
+export interface ImportRowDuplicate {
+  row: number
+  email: string
+}
+
+export interface CandidateImportSummary {
+  created: number
+  errors: ImportRowError[]
+  duplicates: ImportRowDuplicate[]
 }
 
 export interface AIEvaluation {
@@ -131,10 +177,21 @@ export interface InterviewReport {
   session_id: number
   summary: string | null
   recommendation: string | null
+  hr_decision: string | null
   scores: AIScores | null
   overall_score: number | null
   competency_scores: CompetencyScores | null
   strengths: string[] | null
   development_areas: string[] | null
   evidence: ReportEvidenceItem[] | null
+}
+
+export interface AuditLogEntry {
+  id: number
+  created_at: string
+  actor_type: string
+  actor_name: string | null
+  candidate_name: string | null
+  action: string
+  detail: Record<string, unknown> | null
 }

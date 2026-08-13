@@ -3,7 +3,9 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.core.security import hash_password
+from app.models.audit_log import AuditLog
 from app.models.candidate import Candidate, CandidateCV, CandidateSkill
 from app.models.consent import ConsentRecord
 from app.models.interview import InterviewSession
@@ -38,7 +40,8 @@ def compute_interview_deadline(candidate: Candidate) -> datetime:
 
 def create_candidate(db: Session, data: CandidateCreate) -> Candidate:
     candidate_data = data.model_dump(exclude={"password"})
-    candidate = Candidate(**candidate_data, hashed_password=hash_password(data.password))
+    hashed_password = hash_password(data.password) if data.password else None
+    candidate = Candidate(**candidate_data, hashed_password=hashed_password)
     db.add(candidate)
     db.commit()
     db.refresh(candidate)
@@ -58,6 +61,10 @@ def delete_candidate(db: Session, candidate: Candidate) -> None:
     has_consent = db.query(ConsentRecord).filter(ConsentRecord.candidate_id == candidate.id).first()
     if has_sessions is not None or has_consent is not None:
         raise ValueError("Cannot delete a candidate with interview sessions or consent records")
+    # Audit-log rows are lightweight metadata, not substantive candidate
+    # activity — clear them rather than blocking deletion (unlike
+    # sessions/consent above).
+    db.query(AuditLog).filter(AuditLog.candidate_id == candidate.id).delete()
     db.delete(candidate)
     db.commit()
 
@@ -101,6 +108,47 @@ def update_candidate_skill(db: Session, skill: CandidateSkill, data: CandidateSk
 def delete_candidate_skill(db: Session, skill: CandidateSkill) -> None:
     db.delete(skill)
     db.commit()
+
+
+def merge_ai_skills(db: Session, candidate: Candidate, skill_names: list[str]) -> None:
+    """Add AI-extracted CV skills, additively — never removes existing
+    (e.g. HR-added) skills, and skips names already present (case-insensitive).
+    """
+    existing = {s.name.strip().lower() for s in candidate.skills}
+    for name in skill_names:
+        key = name.strip().lower()
+        if not key or key in existing:
+            continue
+        db.add(CandidateSkill(candidate_id=candidate.id, name=name.strip()))
+        existing.add(key)
+    db.commit()
+
+
+def extract_and_merge_cv_skills(candidate_id: int, cv_id: int) -> None:
+    """Background task (see routers/candidates.py upload_my_cv) — the AI
+    skill-extraction call can take well over a minute on a cold local model,
+    so it must not block the upload response or the CV itself would appear
+    to "not show up" while the candidate waits. Opens its own DB session
+    since the request-scoped one is already closed by the time this runs
+    (same pattern as transcription_service.transcribe_pending_answers).
+    """
+    db = SessionLocal()
+    try:
+        cv = db.get(CandidateCV, cv_id)
+        if cv is None or not cv.parsed_text:
+            return
+        candidate = db.get(Candidate, candidate_id)
+        if candidate is None:
+            return
+        job = db.get(Job, candidate.job_id)
+        try:
+            skills = get_ai_provider().extract_skills(cv.parsed_text, job.description if job else "")
+        except Exception:
+            return
+        if skills:
+            merge_ai_skills(db, candidate, skills)
+    finally:
+        db.close()
 
 
 def add_candidate_cv(db: Session, candidate: Candidate, data: CandidateCVCreate) -> CandidateCV:
