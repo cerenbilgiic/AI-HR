@@ -57,6 +57,7 @@ class JobOut(BaseModel):
     location: str | None
     created_by_id: int
     created_by_name: str | None = None
+    evaluation_criteria: str | None = None
     skills: list[JobSkillOut] = []
     questions: list[JobQuestionOut] = []
 

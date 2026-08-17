@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { Eye, Upload } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -8,7 +9,7 @@ import InterviewDetailPanel from '../../components/InterviewDetailPanel'
 import Pagination from '../../components/Pagination'
 import RecommendationBadge from '../../components/RecommendationBadge'
 import { pipelineStatus } from '../../utils/hrStatus'
-import type { Candidate, InterviewSession, InvitationOut, Job } from '../../types'
+import type { Candidate, InterviewSession, InvitationEmail, InvitationOut, Job } from '../../types'
 
 const PAGE_SIZE = 10
 type SortKey = 'date' | 'score'
@@ -17,6 +18,15 @@ function latestSessionFor(candidateId: number, sessions: InterviewSession[]): In
   return sessions
     .filter((s) => s.candidate_id === candidateId)
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+}
+
+// Opens the invitation draft as a real Gmail compose tab instead of sending
+// through backend SMTP — HR reviews/edits it in their own Gmail account and
+// hits send themselves. URLSearchParams handles the percent-encoding
+// (including newlines as %0A) for the multi-line body.
+function gmailComposeUrl(email: InvitationEmail): string {
+  const params = new URLSearchParams({ view: 'cm', fs: '1', to: email.to, su: email.subject, body: email.body })
+  return `https://mail.google.com/mail/?${params.toString()}`
 }
 
 function initialsOf(fullName: string): string {
@@ -49,10 +59,19 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
   const [page, setPage] = useState(1)
 
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [invitingIds, setInvitingIds] = useState<Set<number>>(new Set())
-  const [lastCredentials, setLastCredentials] = useState<InvitationOut | InvitationOut[] | null>(null)
-  const [bulkSending, setBulkSending] = useState(false)
+  const [lastSent, setLastSent] = useState<InvitationOut | InvitationOut[] | null>(null)
   const [inviteError, setInviteError] = useState<string | null>(null)
+
+  // Preview-before-send: clicking "Davet gönder" (single or bulk) opens a
+  // draft of the actual email — including the real magic link — that HR
+  // reviews before anything actually goes out. previewItems is null until
+  // a preview has been requested; previewLoading distinguishes "fetching
+  // the draft" from "draft ready, waiting for HR to confirm or cancel".
+  const [previewItems, setPreviewItems] = useState<{ candidateId: number; email: InvitationEmail }[] | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  // Which candidates in the current preview HR has already clicked
+  // "Gmail'de Aç" for — purely a per-row label swap, see handleGmailOpened.
+  const [markedIds, setMarkedIds] = useState<Set<number>>(new Set())
 
   function loadData() {
     return Promise.all([
@@ -138,41 +157,59 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
     })
   }
 
-  async function handleInvite(candidateId: number) {
-    setInvitingIds((prev) => new Set(prev).add(candidateId))
+  async function openInvitePreview(candidateIds: number[]) {
     setInviteError(null)
+    setPreviewLoading(true)
+    setPreviewItems(null)
+    setMarkedIds(new Set())
     try {
-      const { data } = await apiClient.post<InvitationOut>(`/candidates/${candidateId}/invite`)
-      setLastCredentials(data)
-      await loadData()
-    } catch {
-      setInviteError('Davet gönderilemedi. Lütfen tekrar deneyin.')
+      const results = await Promise.all(
+        candidateIds.map((id) =>
+          apiClient
+            .get<InvitationEmail>(`/candidates/${id}/invite-email`)
+            .then((res) => ({ candidateId: id, email: res.data })),
+        ),
+      )
+      setPreviewItems(results)
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
+      setInviteError(typeof detail === 'string' ? detail : 'Taslak hazırlanamadı. Lütfen tekrar deneyin.')
     } finally {
-      setInvitingIds((prev) => {
-        const next = new Set(prev)
-        next.delete(candidateId)
-        return next
-      })
+      setPreviewLoading(false)
     }
   }
 
-  async function handleBulkInvite() {
-    setBulkSending(true)
-    setInviteError(null)
-    try {
-      const { data } = await apiClient.post<InvitationOut[]>('/candidates/invite-bulk', Array.from(selected))
-      setLastCredentials(data)
-      setSelected(new Set())
-      await loadData()
-    } catch {
-      setInviteError('Toplu davet gönderilemedi. Lütfen tekrar deneyin.')
-    } finally {
-      setBulkSending(false)
-    }
+  function closeInvitePreview() {
+    setPreviewItems(null)
+    setSelected(new Set())
   }
 
-  function copyText(text: string) {
-    void navigator.clipboard?.writeText(text)
+  // Each candidate gets its own real <a target="_blank"> link in the modal
+  // (see the JSX below) rather than a single button that loops
+  // window.open() — a script-triggered window.open is exactly what popup
+  // blockers exist to stop (and browsers cap how many a single click may
+  // open at once), while a genuine anchor click essentially never gets
+  // blocked. onClick fires alongside the browser's own navigation, so this
+  // just records that HR opened Gmail for that candidate.
+  function handleGmailOpened(candidateId: number) {
+    setMarkedIds((prev) => new Set(prev).add(candidateId))
+    void markAsInvited([candidateId])
+  }
+
+  async function markAsInvited(ids: number[]) {
+    try {
+      if (ids.length === 1) {
+        const { data } = await apiClient.post<InvitationOut>(`/candidates/${ids[0]}/invite`)
+        setLastSent(data)
+      } else {
+        const { data } = await apiClient.post<InvitationOut[]>('/candidates/invite-bulk', ids)
+        setLastSent(data)
+      }
+      await loadData()
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
+      setInviteError(typeof detail === 'string' ? detail : 'Gmail açıldı, ancak davet durumu güncellenemedi.')
+    }
   }
 
   if (error) return <p className="text-sm font-medium text-rose-400">{error}</p>
@@ -196,42 +233,31 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
           <div className="flex items-center justify-between rounded-lg bg-indigo-500/10 px-3 py-2 text-xs">
             <span className="text-indigo-300">{selected.size} seçildi</span>
             <button
-              onClick={() => void handleBulkInvite()}
-              disabled={bulkSending}
+              onClick={() => void openInvitePreview(Array.from(selected))}
+              disabled={previewLoading}
               className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
             >
-              {bulkSending ? 'Gönderiliyor…' : 'Davet Gönder'}
+              {previewLoading ? 'Taslak hazırlanıyor…' : 'Davet Gönder'}
             </button>
           </div>
         )}
         {inviteError && <p className="text-xs font-medium text-rose-400">{inviteError}</p>}
-        {lastCredentials && (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
+        {lastSent && (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs">
             <div className="mb-1.5 flex items-center justify-between">
-              <span className="font-medium text-amber-300">Giriş bilgileri oluşturuldu — şimdi iletin.</span>
-              <button onClick={() => setLastCredentials(null)} className="text-slate-400 hover:text-slate-200">
+              <span className="font-medium text-emerald-300">Gmail'de taslak açıldı.</span>
+              <button onClick={() => setLastSent(null)} className="text-slate-400 hover:text-slate-200">
                 ✕
               </button>
             </div>
-            <div className="space-y-1.5">
-              {(Array.isArray(lastCredentials) ? lastCredentials : [lastCredentials]).map((cred) => (
-                <div
-                  key={cred.candidate_id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-700 bg-slate-800 px-2 py-1.5"
-                >
-                  <span className="text-slate-300">
-                    <span className="font-medium text-slate-100">
-                      {candidateById.get(cred.candidate_id)?.full_name ?? `Aday #${cred.candidate_id}`}:
-                    </span>{' '}
-                    {cred.login_email} / {cred.password}
-                  </span>
-                  <button
-                    onClick={() => copyText(`E-posta: ${cred.login_email}\nŞifre: ${cred.password}`)}
-                    className="rounded border border-slate-700 px-1.5 py-0.5 text-[11px] font-medium text-slate-200 hover:bg-slate-700"
-                  >
-                    Kopyala
-                  </button>
-                </div>
+            <div className="space-y-1">
+              {(Array.isArray(lastSent) ? lastSent : [lastSent]).map((sent) => (
+                <p key={sent.candidate_id} className="text-slate-300">
+                  <span className="font-medium text-slate-100">
+                    {candidateById.get(sent.candidate_id)?.full_name ?? `Aday #${sent.candidate_id}`}
+                  </span>{' '}
+                  → {sent.sent_to}
+                </p>
               ))}
             </div>
           </div>
@@ -347,12 +373,12 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  void handleInvite(candidate.id)
+                  void openInvitePreview([candidate.id])
                 }}
-                disabled={invitingIds.has(candidate.id)}
+                disabled={previewLoading}
                 className="mt-1.5 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
               >
-                {invitingIds.has(candidate.id) ? 'Gönderiliyor…' : candidate.invited_at ? 'Yeniden davet gönder' : 'Davet gönder'}
+                {previewLoading ? 'Taslak hazırlanıyor…' : candidate.invited_at ? 'Yeniden davet gönder' : 'Davet gönder'}
               </button>
             </div>
             <Eye className="h-4 w-4 flex-shrink-0 text-slate-600" />
@@ -363,6 +389,58 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
       <div className="border-t border-slate-800 p-2">
         <Pagination page={page} totalPages={totalPages} onChange={setPage} />
       </div>
+
+      {previewItems && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-xl bg-slate-900 p-6 shadow-lg">
+            <h3 className="mb-1 text-lg font-semibold text-slate-100">
+              {previewItems.length > 1 ? `${previewItems.length} Davet — Önizleme` : 'Davet — Önizleme'}
+            </h3>
+            <p className="mb-4 text-xs text-slate-500">
+              Her aday için "Gmail'de Aç" bu içerikle dolu bir Gmail taslak sekmesi açar — e-postayı
+              gerçekten göndermek için Gmail'deki "Gönder" butonuna basmanız gerekir.
+            </p>
+            <div className="space-y-3">
+              {previewItems.map((item) => {
+                const c = candidateById.get(item.candidateId)
+                return (
+                  <div key={item.candidateId} className="rounded-lg border border-slate-800 bg-slate-800/40 p-3">
+                    {c && <p className="mb-1 text-xs font-medium text-slate-100">{c.full_name}</p>}
+                    <p className="text-xs text-slate-500">
+                      Alıcı: <span className="text-slate-300">{item.email.to}</span>
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Konu: <span className="text-slate-300">{item.email.subject}</span>
+                    </p>
+                    <p className="mt-2 whitespace-pre-line rounded border border-slate-700 bg-slate-900 p-2 text-xs text-slate-300">
+                      {item.email.body}
+                    </p>
+                    <a
+                      href={gmailComposeUrl(item.email)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => handleGmailOpened(item.candidateId)}
+                      className={`mt-2 inline-block rounded px-3 py-1.5 text-xs font-medium text-white ${
+                        markedIds.has(item.candidateId) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-indigo-600 hover:bg-indigo-500'
+                      }`}
+                    >
+                      {markedIds.has(item.candidateId) ? "Gmail'de açıldı ✓" : "Gmail'de Aç →"}
+                    </a>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="mt-4">
+              <button
+                onClick={closeInvitePreview}
+                className="w-full rounded border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

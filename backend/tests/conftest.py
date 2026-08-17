@@ -7,11 +7,55 @@ from sqlalchemy.orm import Session as SASession
 from app.api.v1.deps import get_current_candidate, get_current_user, get_current_user_or_candidate
 from app.core.database import engine, get_db
 from app.main import app
+from app.models.ai_evaluation import AIEvaluation
+from app.models.ai_score import AIScore, InterviewReport
 from app.models.candidate import Candidate
-from app.models.interview import InterviewQuestion, InterviewSession
+from app.models.interview import CandidateAnswer, InterviewQuestion, InterviewSession
 from app.models.job import Job
 from app.models.user import Role, User
 from app.services.storage import MediaStorage, get_media_storage
+
+
+def clear_candidate_sessions(db_session: SASession, candidate_id: int) -> None:
+    """create_session rejects a candidate who already has ANY session (see
+    the "one attempt only" guard in interview_service.create_session) — the
+    shared seeded `candidate`/`other_candidate` fixtures can already carry
+    one from real seed data or earlier manual testing. Tests that call
+    create_session directly (or via POST /interviews) must start clean;
+    deletes in FK-dependency order since none of these are DB-level cascade.
+    """
+    session_ids = [
+        row[0]
+        for row in db_session.query(InterviewSession.id)
+        .filter(InterviewSession.candidate_id == candidate_id)
+        .all()
+    ]
+    if not session_ids:
+        return
+    answer_ids = [
+        row[0]
+        for row in db_session.query(CandidateAnswer.id)
+        .filter(CandidateAnswer.session_id.in_(session_ids))
+        .all()
+    ]
+    if answer_ids:
+        db_session.query(AIEvaluation).filter(AIEvaluation.answer_id.in_(answer_ids)).delete(
+            synchronize_session=False
+        )
+    db_session.query(AIScore).filter(AIScore.session_id.in_(session_ids)).delete(synchronize_session=False)
+    db_session.query(InterviewReport).filter(InterviewReport.session_id.in_(session_ids)).delete(
+        synchronize_session=False
+    )
+    db_session.query(CandidateAnswer).filter(CandidateAnswer.session_id.in_(session_ids)).delete(
+        synchronize_session=False
+    )
+    db_session.query(InterviewQuestion).filter(InterviewQuestion.session_id.in_(session_ids)).delete(
+        synchronize_session=False
+    )
+    db_session.query(InterviewSession).filter(InterviewSession.id.in_(session_ids)).delete(
+        synchronize_session=False
+    )
+    db_session.commit()
 
 
 class FakeMediaStorage(MediaStorage):

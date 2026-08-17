@@ -41,6 +41,8 @@ export default function CandidateDetailPanel({
   const [error, setError] = useState<string | null>(null)
   const [cvLoading, setCvLoading] = useState(false)
   const [cvError, setCvError] = useState<string | null>(null)
+  const [resetting, setResetting] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
 
   useEffect(() => {
     setCandidate(null)
@@ -68,6 +70,22 @@ export default function CandidateDetailPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidateId])
 
+  async function handleResetDeadline() {
+    if (!candidate || resetting) return
+    setResetting(true)
+    setResetError(null)
+    try {
+      const { data } = await apiClient.post<CandidateDetailType>(
+        `/candidates/${candidate.id}/reset-interview-deadline`,
+      )
+      setCandidate(data)
+    } catch {
+      setResetError('Yeni süre tanımlanamadı. Lütfen tekrar deneyin.')
+    } finally {
+      setResetting(false)
+    }
+  }
+
   async function handleViewCv() {
     if (!candidate || !latestCv) return
     setCvLoading(true)
@@ -91,6 +109,12 @@ export default function CandidateDetailPanel({
 
   const latestCv = candidate.cvs[candidate.cvs.length - 1]
   const latestSession = sessions[0]
+  // Only the "never started, window closed" case gets a reset offer — a
+  // session already in progress/terminated/completed means the deadline
+  // isn't what's blocking them (matches interview_service.create_session's
+  // deadline check, which only runs before any session exists).
+  const deadlinePassed =
+    !latestSession && !!candidate.interview_deadline && new Date(candidate.interview_deadline).getTime() < Date.now()
 
   return (
     <div className="space-y-4">
@@ -140,6 +164,15 @@ export default function CandidateDetailPanel({
             <dt className="text-xs uppercase text-slate-500">Başvuru Tarihi</dt>
             <dd className="text-slate-300">{new Date(candidate.created_at).toLocaleDateString()}</dd>
           </div>
+          {candidate.interview_deadline && (
+            <div>
+              <dt className="text-xs uppercase text-slate-500">Mülakat Süresi</dt>
+              <dd className={deadlinePassed ? 'text-rose-400' : 'text-slate-300'}>
+                {new Date(candidate.interview_deadline).toLocaleDateString()}
+                {deadlinePassed && ' (doldu)'}
+              </dd>
+            </div>
+          )}
           <div className="col-span-2">
             <dt className="text-xs uppercase text-slate-500">Belirtilen Beceriler</dt>
             <dd className="text-slate-300">
@@ -147,6 +180,18 @@ export default function CandidateDetailPanel({
             </dd>
           </div>
         </dl>
+        {deadlinePassed && (
+          <div className="mt-3 border-t border-slate-800 pt-3">
+            <button
+              onClick={() => void handleResetDeadline()}
+              disabled={resetting}
+              className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+            >
+              {resetting ? 'Tanımlanıyor…' : 'Yeni Mülakat Süresi Tanı'}
+            </button>
+            {resetError && <p className="mt-2 text-xs font-medium text-rose-400">{resetError}</p>}
+          </div>
+        )}
       </div>
 
       <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 shadow-sm">

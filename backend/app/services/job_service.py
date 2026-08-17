@@ -2,12 +2,15 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core.database import SessionLocal
 from app.models.audit_log import AuditLog
 from app.models.candidate import Candidate
 from app.models.job import Job, JobQuestion, JobSkill
 from app.models.job_transfer_request import JobTransferRequest
 from app.models.user import Role, User
 from app.schemas.job import JobCreate, JobQuestionIn, JobQuestionUpdate, JobSkillIn, JobSkillUpdate, JobUpdate
+from app.services.ai import get_ai_provider
+from app.services.interview_service import _format_required_skills
 
 
 def list_jobs(db: Session, visible_to: User | None = None) -> list[Job]:
@@ -54,6 +57,33 @@ def create_job(db: Session, data: JobCreate, created_by_id: int) -> Job:
     db.commit()
     db.refresh(job)
     return job
+
+
+def generate_evaluation_criteria(job_id: int) -> None:
+    """Background task (see routers/jobs.py create_job) — generates a
+    job-specific evaluation rubric so report_service's final-report prompt
+    can judge candidates against criteria tailored to this exact position
+    instead of only the generic six-competency framework. Opens its own DB
+    session since the request-scoped one is already closed by the time this
+    runs (same pattern as candidate_service.extract_and_merge_cv_skills).
+    Best-effort: a failure here just leaves evaluation_criteria None, it
+    never blocks or retries job creation itself.
+    """
+    db = SessionLocal()
+    try:
+        job = db.get(Job, job_id)
+        if job is None:
+            return
+        required_skills = _format_required_skills(job)
+        try:
+            criteria = get_ai_provider().generate_evaluation_criteria(job.title, job.description, required_skills)
+        except Exception:
+            return
+        if criteria:
+            job.evaluation_criteria = "\n".join(f"- {c}" for c in criteria)
+            db.commit()
+    finally:
+        db.close()
 
 
 def update_job(db: Session, job: Job, data: JobUpdate) -> Job:

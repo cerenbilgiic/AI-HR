@@ -47,6 +47,7 @@ class AIProvider(ABC):
         candidate_cv: str,
         questions_and_answers: str,
         answer_evaluations: str,
+        evaluation_criteria: str = "",
     ) -> dict:
         ...
 
@@ -56,6 +57,10 @@ class AIProvider(ABC):
 
     @abstractmethod
     def extract_skills(self, cv_text: str, job_description: str) -> list[str]:
+        ...
+
+    @abstractmethod
+    def generate_evaluation_criteria(self, job_title: str, job_description: str, required_skills: str) -> list[str]:
         ...
 
     @abstractmethod

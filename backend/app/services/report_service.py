@@ -7,7 +7,7 @@ from app.models.ai_evaluation import AIEvaluation
 from app.models.candidate import Candidate
 from app.models.interview import CandidateAnswer, InterviewSession
 from app.models.job import Job
-from app.schemas.report import FinalReportLLMResponse
+from app.schemas.report import CompetencyScores, FinalReportLLMResponse
 from app.services.ai import get_ai_provider
 from app.services.ai.base import AIResponseError
 from app.services.interview_service import _format_required_skills
@@ -47,6 +47,36 @@ def _format_answer_evaluations(db: Session, answers: list[CandidateAnswer]) -> s
     return "\n".join(lines)
 
 
+def _answered_count(session: InterviewSession) -> int:
+    return sum(1 for a in session.answers if a.transcript and a.transcript.strip())
+
+
+def _blank_interview_report() -> FinalReportLLMResponse:
+    """A candidate who never answered a single question has zero evidence to
+    evaluate. Small local models tend to guess a mediocre "no evidence"
+    score (e.g. ~20) instead of confidently scoring 0 — so this case skips
+    the LLM call entirely and returns a deterministic zero report instead,
+    guaranteeing the score reflects reality regardless of model behavior.
+    """
+    zero_scores = CompetencyScores(
+        communication=0,
+        technical_competency=0,
+        problem_solving=0,
+        teamwork=0,
+        customer_service=0,
+        role_fit=0,
+    )
+    return FinalReportLLMResponse(
+        overall_score=0,
+        recommendation="not_recommended",
+        competency_scores=zero_scores,
+        strengths=[],
+        development_areas=["Aday mülakattaki hiçbir soruya cevap vermedi."],
+        summary="Aday mülakat sırasında hiçbir soruyu cevaplamadığı için değerlendirilecek bir yanıt bulunmuyor.",
+        evidence=[],
+    )
+
+
 def generate_final_report(db: Session, session_id: int) -> InterviewReport:
     session = db.get(InterviewSession, session_id)
     if session is None:
@@ -63,19 +93,23 @@ def generate_final_report(db: Session, session_id: int) -> InterviewReport:
     candidate = db.get(Candidate, session.candidate_id)
     job = db.get(Job, session.job_id)
 
-    raw = get_ai_provider().generate_final_report(
-        job_description=job.description if job else "",
-        required_skills=_format_required_skills(job),
-        candidate_profile=_format_candidate_profile(candidate) if candidate else "Belirtilmemiş",
-        candidate_cv=(candidate.cvs[-1].parsed_text if candidate and candidate.cvs else "") or "Sunulmadı",
-        questions_and_answers=_format_questions_and_answers(session),
-        answer_evaluations=_format_answer_evaluations(db, session.answers),
-    )
+    if _answered_count(session) == 0:
+        validated = _blank_interview_report()
+    else:
+        raw = get_ai_provider().generate_final_report(
+            job_description=job.description if job else "",
+            required_skills=_format_required_skills(job),
+            candidate_profile=_format_candidate_profile(candidate) if candidate else "Belirtilmemiş",
+            candidate_cv=(candidate.cvs[-1].parsed_text if candidate and candidate.cvs else "") or "Sunulmadı",
+            questions_and_answers=_format_questions_and_answers(session),
+            answer_evaluations=_format_answer_evaluations(db, session.answers),
+            evaluation_criteria=(job.evaluation_criteria if job else None) or "",
+        )
 
-    try:
-        validated = FinalReportLLMResponse.model_validate(raw)
-    except ValidationError as exc:
-        raise AIResponseError(f"Model returned an invalid report: {exc}") from exc
+        try:
+            validated = FinalReportLLMResponse.model_validate(raw)
+        except ValidationError as exc:
+            raise AIResponseError(f"Model returned an invalid report: {exc}") from exc
 
     # Re-check right before writing — the AI call above can take a minute or
     # more, long enough for a concurrent request (e.g. HR re-clicking

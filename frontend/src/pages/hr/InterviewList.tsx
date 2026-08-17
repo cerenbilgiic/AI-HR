@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import apiClient from '../../api/client'
 import HrStatusBadge from '../../components/HrStatusBadge'
 import RecommendationBadge from '../../components/RecommendationBadge'
+import { useEvaluationsVersion } from '../../hooks/useEvaluationsVersion'
 import type { Candidate, InterviewSession, Job } from '../../types'
+import { evaluateSession, isEvaluating } from '../../utils/evaluationTracker'
 
 export default function InterviewList() {
   const navigate = useNavigate()
@@ -15,8 +17,8 @@ export default function InterviewList() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [positionFilter, setPositionFilter] = useState('all')
-  const [evaluatingId, setEvaluatingId] = useState<number | null>(null)
   const [evaluateError, setEvaluateError] = useState<string | null>(null)
+  useEvaluationsVersion()
 
   function loadSessions() {
     return apiClient.get<InterviewSession[]>('/interviews').then((res) => setSessions(res.data))
@@ -37,19 +39,18 @@ export default function InterviewList() {
   }, [])
 
   async function evaluate(sessionId: number) {
-    setEvaluatingId(sessionId)
     setEvaluateError(null)
     try {
       // generate-report (not the older evaluate) is what actually produces
       // overall_score/competency_scores — see JobDetail.tsx's identical
       // evaluate() for why. Re-fetches in place (no navigation) so HR can
-      // keep evaluating other rows in this same list.
-      await apiClient.post(`/interviews/${sessionId}/generate-report`)
+      // keep evaluating other rows in this same list. evaluateSession
+      // tracks the in-progress state globally (not just local state), so
+      // it survives navigating to another sidebar tab and back too.
+      await evaluateSession(sessionId)
       await loadSessions()
     } catch {
       setEvaluateError('Bu mülakat değerlendirilemedi. Lütfen tekrar deneyin.')
-    } finally {
-      setEvaluatingId(null)
     }
   }
 
@@ -148,10 +149,10 @@ export default function InterviewList() {
                     {session.status === 'awaiting_review' && (
                       <button
                         onClick={() => void evaluate(session.id)}
-                        disabled={evaluatingId === session.id}
+                        disabled={isEvaluating(session.id)}
                         className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
                       >
-                        {evaluatingId === session.id ? 'Değerlendiriliyor…' : 'Değerlendir'}
+                        {isEvaluating(session.id) ? 'Değerlendiriliyor…' : 'Değerlendir'}
                       </button>
                     )}
                     <button

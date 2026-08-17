@@ -1,10 +1,7 @@
 import {
-  Award,
   Bell,
   Briefcase,
-  ClipboardList,
   FileText,
-  History,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -17,10 +14,9 @@ import {
 } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import apiClient, { candidateApiClient } from '../api/client'
+import apiClient from '../api/client'
 import { useUnreadNotificationCount } from '../hooks/useUnreadNotificationCount'
 import { ROLE_LABELS } from '../utils/roles'
-import type { Candidate } from '../types'
 
 interface HrUser {
   id: number
@@ -35,29 +31,15 @@ const HR_SIDEBAR_ITEMS = [
   { to: '/hr/interviews', label: 'Mülakatlar', icon: Video },
   { to: '/hr/jobs', label: 'İş İlanları', icon: Briefcase },
   { to: '/hr/reports', label: 'Raporlar', icon: FileText },
-  // Backend-enforced too (get_current_admin/get_current_manager) — hidden
-  // here just so an account without the role doesn't see a link that
-  // would 403.
-  { to: '/hr/audit-log', label: 'İşlem Geçmişi', icon: History, roles: ['admin'] },
-  { to: '/hr/employees', label: 'Çalışanlar', icon: UserCog, roles: ['admin', 'hr_manager'] },
+  // hr_manager-only now — admin manages employees (and audit log) from its
+  // own separate /admin/* panel, see components/AdminLayout.tsx. Still
+  // backend-enforced too (get_current_manager), this is just UX politeness.
+  { to: '/hr/employees', label: 'Çalışanlar', icon: UserCog, roles: ['hr_manager'] },
   { to: '/hr/notifications', label: 'Bildirimler', icon: Bell },
   { to: '/hr/profile', label: 'Profilim', icon: User },
   { to: '/hr/settings', label: 'Ayarlar', icon: SettingsIcon },
 ]
 
-const CANDIDATE_SIDEBAR_ITEMS = [
-  { suffix: '/home', label: 'Dashboard', icon: LayoutDashboard },
-  { suffix: '/home/applications', label: 'Başvurularım', icon: ClipboardList },
-  { suffix: '/home/interviews', label: 'Mülakatlarım', icon: Video },
-  { suffix: '/home/completed', label: 'Mülakat Geçmişi', icon: History },
-  { suffix: '/home/results', label: 'Sonuçlarım', icon: Award },
-  { suffix: '/home/profile', label: 'Profilim', icon: User },
-  { suffix: '/home/notifications', label: 'Bildirimler', icon: Bell },
-  { suffix: '/home/settings', label: 'Ayarlar', icon: SettingsIcon },
-]
-
-// Shared by both HR and candidate sidebars — same dark look, just different
-// items/targets.
 const NAV_ITEM_CLASSES = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
     isActive ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
@@ -72,6 +54,12 @@ function initialsOf(fullName: string): string {
     .join('')
 }
 
+// The HR/candidate portal shell. The candidate side has no dashboard or
+// sidebar anymore — a candidate only ever visits consent/avatar/interview
+// pages reached via a one-time emailed link (see pages/candidate/EnterInterview.tsx),
+// so those render through the plain centered branch below, same as any
+// other chrome-less page. The admin portal is a fully separate shell
+// (components/AdminLayout.tsx) and never renders this component at all.
 export default function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -82,24 +70,11 @@ export default function Layout({ children }: { children: ReactNode }) {
   // better narrower, so only this one gets the wider container.
   const isWorkspaceRoute =
     location.pathname === '/hr/candidates' || /^\/hr\/candidates\/\d+$/.test(location.pathname)
-  const candidateDashboardMatch = location.pathname.match(/^\/interview\/([^/]+)\/home/)
-  const candidateId = candidateDashboardMatch?.[1]
 
-  const [candidate, setCandidate] = useState<Candidate | null>(null)
   const [hrUser, setHrUser] = useState<HrUser | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const unreadCount = useUnreadNotificationCount(showHrSidebar)
-
-  useEffect(() => {
-    if (!candidateId) return
-    candidateApiClient
-      .get<Candidate>('/candidates/me')
-      .then((res) => setCandidate(res.data))
-      .catch(() => {
-        // Non-fatal — the sidebar just falls back to no name/initials.
-      })
-  }, [candidateId])
 
   useEffect(() => {
     if (!showHrSidebar) return
@@ -115,12 +90,12 @@ export default function Layout({ children }: { children: ReactNode }) {
     setMobileNavOpen(false)
   }, [location.pathname])
 
-  // Distinct browser-tab titles per portal — so the three login pages
-  // (admin / İK / aday) are tellable apart when open in separate tabs.
+  // Distinct browser-tab titles per portal — so the İK and aday login pages
+  // are tellable apart when open in separate tabs. The admin portal never
+  // renders this component at all (see App.tsx's AppShell / AdminLayout),
+  // so there's no /admin case to handle here.
   useEffect(() => {
-    if (location.pathname.startsWith('/admin')) {
-      document.title = 'AI-HR · Yönetici'
-    } else if (location.pathname.startsWith('/hr')) {
+    if (location.pathname.startsWith('/hr')) {
       document.title = 'AI-HR · İK Paneli'
     } else if (location.pathname.startsWith('/interview')) {
       document.title = 'AI-HR · Aday Paneli'
@@ -128,11 +103,6 @@ export default function Layout({ children }: { children: ReactNode }) {
       document.title = 'AI-HR'
     }
   }, [location.pathname])
-
-  function handleCandidateLogout() {
-    localStorage.removeItem('candidate_access_token')
-    navigate('/interview/login')
-  }
 
   function handleHrLogout() {
     localStorage.removeItem('access_token')
@@ -142,45 +112,6 @@ export default function Layout({ children }: { children: ReactNode }) {
   function handleSearchSubmit(e: FormEvent) {
     e.preventDefault()
     navigate(`/hr/candidates${searchQuery.trim() ? `?q=${encodeURIComponent(searchQuery.trim())}` : ''}`)
-  }
-
-  function candidateNav(onNavigate?: () => void) {
-    return (
-      <>
-        {candidate && (
-          <div className="mb-4 flex items-center gap-2 border-b border-slate-800 pb-4">
-            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">
-              {initialsOf(candidate.full_name)}
-            </span>
-            <span className="truncate text-sm font-medium text-slate-100">{candidate.full_name}</span>
-          </div>
-        )}
-        <nav className="space-y-1">
-          {CANDIDATE_SIDEBAR_ITEMS.map((item) => (
-            <NavLink
-              key={item.suffix}
-              to={`/interview/${candidateId}${item.suffix}`}
-              end={item.suffix === '/home'}
-              onClick={onNavigate}
-              className={NAV_ITEM_CLASSES}
-            >
-              <item.icon className="h-4 w-4 flex-shrink-0" />
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="mt-4 border-t border-slate-800 pt-4">
-          <button
-            type="button"
-            onClick={handleCandidateLogout}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-100"
-          >
-            <LogOut className="h-4 w-4 flex-shrink-0" />
-            Çıkış Yap
-          </button>
-        </div>
-      </>
-    )
   }
 
   function hrNav(onNavigate?: () => void) {
@@ -219,13 +150,11 @@ export default function Layout({ children }: { children: ReactNode }) {
     )
   }
 
-  const sidebarActive = Boolean(candidateId) || showHrSidebar
-
   return (
     <div className="min-h-screen bg-slate-950">
       <header className="border-b border-slate-800 bg-slate-900 px-6 py-4">
         <div className={`mx-auto flex items-center gap-4 ${showHrSidebar ? 'max-w-6xl' : 'max-w-5xl'}`}>
-          {sidebarActive && (
+          {showHrSidebar && (
             <button
               type="button"
               onClick={() => setMobileNavOpen(true)}
@@ -269,22 +198,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           )}
         </div>
       </header>
-      {candidateId ? (
-        <div className="mx-auto flex max-w-5xl gap-6 px-6 py-8">
-          <aside className="hidden w-56 flex-shrink-0 md:block">{candidateNav()}</aside>
-
-          {mobileNavOpen && (
-            <div className="fixed inset-0 z-50 md:hidden">
-              <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
-              <div className="absolute left-0 top-0 h-full w-64 overflow-y-auto bg-slate-900 p-4 shadow-lg">
-                {candidateNav(() => setMobileNavOpen(false))}
-              </div>
-            </div>
-          )}
-
-          <main className="min-w-0 flex-1">{children}</main>
-        </div>
-      ) : showHrSidebar ? (
+      {showHrSidebar ? (
         <div className={`mx-auto flex gap-6 px-6 py-8 ${isWorkspaceRoute ? 'max-w-[1680px]' : 'max-w-6xl'}`}>
           <aside className="hidden w-56 flex-shrink-0 md:block">{hrNav()}</aside>
 

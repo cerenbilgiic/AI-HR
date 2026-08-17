@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.core.security import hash_password
 from app.models.audit_log import AuditLog
 from app.models.candidate import Candidate, CandidateCV, CandidateSkill
 from app.models.consent import ConsentRecord
@@ -34,14 +33,33 @@ def get_candidate(db: Session, candidate_id: int) -> Candidate | None:
 
 
 def compute_interview_deadline(candidate: Candidate) -> datetime:
-    """Automatic, not HR-set — N days from account creation (settings.interview_deadline_days)."""
-    return candidate.created_at + timedelta(days=settings.interview_deadline_days)
+    """N days from account creation (settings.interview_deadline_days) —
+    or from interview_reset_at instead, once HR has granted the candidate
+    a fresh window via reset_interview_deadline below."""
+    base = candidate.interview_reset_at or candidate.created_at
+    return base + timedelta(days=settings.interview_deadline_days)
+
+
+def reset_interview_deadline(db: Session, candidate: Candidate, actor_id: int | None = None) -> Candidate:
+    """HR override for a candidate whose original window closed before they
+    ever started the interview (see create_session's deadline check) —
+    gives them a new settings.interview_deadline_days-day window from now."""
+    candidate.interview_reset_at = datetime.now()
+    db.add(
+        AuditLog(
+            actor_type="hr",
+            actor_id=actor_id,
+            candidate_id=candidate.id,
+            action="interview_deadline_reset",
+        )
+    )
+    db.commit()
+    db.refresh(candidate)
+    return candidate
 
 
 def create_candidate(db: Session, data: CandidateCreate) -> Candidate:
-    candidate_data = data.model_dump(exclude={"password"})
-    hashed_password = hash_password(data.password) if data.password else None
-    candidate = Candidate(**candidate_data, hashed_password=hashed_password)
+    candidate = Candidate(**data.model_dump())
     db.add(candidate)
     db.commit()
     db.refresh(candidate)

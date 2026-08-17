@@ -3,10 +3,19 @@ from pydantic import BaseModel
 
 class InvitationOut(BaseModel):
     candidate_id: int
-    login_email: str
-    # Plaintext, shown only once — the backend never stores or re-exposes
-    # it after this response (see invitation_service.issue_credentials).
-    password: str
+    sent_to: str
+
+
+class InvitationEmailOut(BaseModel):
+    """The invitation-email draft — see GET /candidates/{id}/invite-email
+    (preview, no side effects) and POST /candidates/{id}/invite (the actual
+    send). `body` is plain text, paragraphs already joined — the single
+    source of truth for both the HR-facing preview and the sent email (see
+    invitation_service.preview_interview_link_email)."""
+
+    to: str
+    subject: str
+    body: str
 
 
 class ImportRowError(BaseModel):

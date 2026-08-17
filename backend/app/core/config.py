@@ -38,6 +38,23 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173"
 
+    # Used to build the outbound magic-link/interview URLs embedded in
+    # emails (see services/email_service.py) — never used for CORS, that's
+    # cors_origins above.
+    frontend_base_url: str = "http://localhost:5173"
+
+    # SMTP — real outbound email (interview invitation link, decision
+    # result). smtp_username/smtp_password are blank by default; email_service
+    # raises a clear error rather than silently no-op'ing if a send is
+    # attempted without them configured. Gmail: use an App Password, not the
+    # account password (smtp.gmail.com, port 587, TLS).
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "AI-HR İşe Alım"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

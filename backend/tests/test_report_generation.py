@@ -42,6 +42,23 @@ def _build_five_question_session(db_session, candidate, job) -> InterviewSession
     return session
 
 
+def _build_blank_session(db_session, candidate, job, with_blank_rows: bool) -> InterviewSession:
+    session = InterviewSession(candidate_id=candidate.id, job_id=job.id, status="awaiting_review")
+    session.questions = [InterviewQuestion(text=q, order=i) for i, q in enumerate(QUESTIONS)]
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    if with_blank_rows:
+        # Mirrors a real timeout submission: _get_or_create_answer always
+        # writes a row, even when the candidate never actually spoke/typed.
+        for question in session.questions:
+            db_session.add(CandidateAnswer(session_id=session.id, question_id=question.id, transcript=""))
+        db_session.commit()
+        db_session.refresh(session)
+    return session
+
+
 def _valid_llm_response(**overrides):
     response = {
         "overall_score": 78,
@@ -97,6 +114,35 @@ def test_generate_report_success(db_session, candidate, job, mocker):
     for answer_text in ANSWERS:
         assert answer_text in kwargs["questions_and_answers"]
     assert candidate.full_name in kwargs["candidate_profile"]
+
+
+def test_generate_report_blank_interview_scores_zero_without_calling_ai(db_session, candidate, job, mocker):
+    # Regression: a candidate who never answers anything used to still get
+    # an LLM-guessed "no evidence" score (small local models tend to land
+    # around ~20 instead of 0) — this must be a deterministic zero, and the
+    # AI provider shouldn't even be called.
+    session = _build_blank_session(db_session, candidate, job, with_blank_rows=True)
+    provider = _mock_provider(mocker)
+
+    report = report_service.generate_final_report(db_session, session.id)
+
+    assert report.overall_score == 0
+    assert report.recommendation == "not_recommended"
+    assert all(v == 0 for v in report.competency_scores.values())
+    assert report.strengths == []
+    provider.generate_final_report.assert_not_called()
+    db_session.refresh(session)
+    assert session.status == "completed"
+
+
+def test_generate_report_blank_interview_with_no_answer_rows_at_all(db_session, candidate, job, mocker):
+    session = _build_blank_session(db_session, candidate, job, with_blank_rows=False)
+    provider = _mock_provider(mocker)
+
+    report = report_service.generate_final_report(db_session, session.id)
+
+    assert report.overall_score == 0
+    provider.generate_final_report.assert_not_called()
 
 
 def test_generate_report_rejects_in_progress_session(db_session, interview_session, mocker):
@@ -172,6 +218,32 @@ def test_generate_report_no_prior_evaluations_uses_placeholder_text(db_session, 
 
     kwargs = provider.generate_final_report.call_args.kwargs
     assert "önceki bir yapay zekâ değerlendirmesi bulunmuyor" in kwargs["answer_evaluations"]
+
+
+def test_generate_report_passes_job_evaluation_criteria_to_provider(db_session, candidate, job, mocker):
+    job.evaluation_criteria = "- Kasada hızlı işlem\n- Müşteriyle göz teması"
+    db_session.commit()
+    session = _build_five_question_session(db_session, candidate, job)
+    provider = _mock_provider(mocker)
+
+    report_service.generate_final_report(db_session, session.id)
+
+    kwargs = provider.generate_final_report.call_args.kwargs
+    assert kwargs["evaluation_criteria"] == "- Kasada hızlı işlem\n- Müşteriyle göz teması"
+
+
+def test_generate_report_evaluation_criteria_defaults_to_empty_string(db_session, candidate, job, mocker):
+    # job.evaluation_criteria is None until the background task (see
+    # test_job_evaluation_criteria.py) finishes — generate_final_report
+    # must not crash or pass None through to the provider in that window.
+    assert job.evaluation_criteria is None
+    session = _build_five_question_session(db_session, candidate, job)
+    provider = _mock_provider(mocker)
+
+    report_service.generate_final_report(db_session, session.id)
+
+    kwargs = provider.generate_final_report.call_args.kwargs
+    assert kwargs["evaluation_criteria"] == ""
 
 
 # API-level tests (endpoint wiring, auth, HTTP status mapping)

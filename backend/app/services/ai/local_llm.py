@@ -38,6 +38,29 @@ def _parse_json(raw: str) -> dict:
         return value
 
 
+_CRITERION_NAME_KEYS = ("criterion_name", "title", "name", "criterion", "kriter", "başlık")
+_CRITERION_DESC_KEYS = ("description", "detail", "aciklama", "açıklama", "detay")
+
+
+def _flatten_criterion(item: object) -> str | None:
+    """generate_evaluation_criteria asks for a flat list of strings, but the
+    local model frequently ignores that and returns
+    {"criterion_name"/"title"/...: "...", "description"/...: "..."} objects
+    instead — fold whichever fields it actually used into one readable line
+    rather than silently dropping every criterion (seen in practice: this
+    happens often enough that a strict isinstance(str) filter returned []
+    every time)."""
+    if isinstance(item, str):
+        return item.strip() or None
+    if not isinstance(item, dict):
+        return None
+    name = next((item[k].strip() for k in _CRITERION_NAME_KEYS if isinstance(item.get(k), str) and item[k].strip()), None)
+    desc = next((item[k].strip() for k in _CRITERION_DESC_KEYS if isinstance(item.get(k), str) and item[k].strip()), None)
+    if name and desc:
+        return f"{name}: {desc}"
+    return name or desc
+
+
 def _require_keys(data: dict, keys: list[str]) -> dict:
     missing = [key for key in keys if key not in data]
     if missing:
@@ -157,6 +180,7 @@ class LocalOllamaProvider(AIProvider):
         candidate_cv: str,
         questions_and_answers: str,
         answer_evaluations: str,
+        evaluation_criteria: str = "",
     ) -> dict:
         prompt = prompts.FINAL_REPORT_PROMPT.format(
             job_description=job_description,
@@ -165,6 +189,8 @@ class LocalOllamaProvider(AIProvider):
             candidate_cv=candidate_cv,
             questions_and_answers=questions_and_answers,
             answer_evaluations=answer_evaluations,
+            evaluation_criteria=evaluation_criteria
+            or "Bu pozisyon için özel bir değerlendirme kriteri henüz oluşturulmadı; genel yetkinlik çerçevesini kullan.",
         )
         return _parse_json(self._chat(prompt))
 
@@ -180,6 +206,17 @@ class LocalOllamaProvider(AIProvider):
             return []
         cleaned = [s.strip() for s in skills if isinstance(s, str) and s.strip()]
         return [s for s in cleaned if _CLEAN_SKILL_NAME_RE.match(s)][:12]
+
+    def generate_evaluation_criteria(self, job_title: str, job_description: str, required_skills: str) -> list[str]:
+        prompt = prompts.EVALUATION_CRITERIA_PROMPT.format(
+            job_title=job_title, job_description=job_description, required_skills=required_skills
+        )
+        data = _parse_json(self._chat(prompt))
+        raw_criteria = data.get("criteria", [])
+        if not isinstance(raw_criteria, list):
+            return []
+        criteria = [_flatten_criterion(item) for item in raw_criteria]
+        return [c for c in criteria if c][:8]
 
     def transcribe(self, audio_path: str) -> str:
         return self._stt.transcribe(audio_path)

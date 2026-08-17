@@ -18,6 +18,7 @@ export interface Job {
   location: string | null
   created_by_id: number
   created_by_name: string | null
+  evaluation_criteria: string | null
   skills: JobSkill[]
   questions: JobQuestionItem[]
 }
@@ -44,7 +45,6 @@ export interface Candidate {
   phone: string | null
   job_id: number
   created_at: string
-  login_email: string | null
   invited_at: string | null
   first_login_at: string | null
 }
@@ -114,8 +114,19 @@ export interface InterviewSession {
 
 export interface InvitationOut {
   candidate_id: number
-  login_email: string
-  password: string
+  sent_to: string
+}
+
+export interface InvitationEmail {
+  to: string
+  subject: string
+  body: string
+}
+
+export interface DecisionEmail {
+  to: string
+  subject: string
+  body: string
 }
 
 export interface ImportRowError {

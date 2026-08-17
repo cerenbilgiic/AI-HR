@@ -39,15 +39,25 @@ def create_session(db: Session, candidate: Candidate) -> InterviewSession:
     a job is asked the same fixed set. No AI call: question authorship is
     entirely HR's, not generated (see generate_questions/QUESTION_GENERATION_PROMPT,
     left in place but no longer called by this flow)."""
-    already_terminated = (
+    # One attempt only — a candidate must never be able to get a fresh
+    # session (new questions, reset progress) just by reloading the page
+    # after an abandoned in_progress session. The frontend resumes an
+    # in_progress session in place instead of calling this again; this
+    # check is the hard backend guard against that being bypassed.
+    existing = (
         db.query(InterviewSession)
-        .filter(InterviewSession.candidate_id == candidate.id, InterviewSession.status == "terminated")
+        .filter(InterviewSession.candidate_id == candidate.id)
+        .order_by(InterviewSession.id.desc())
         .first()
     )
-    if already_terminated is not None:
-        raise ValueError(
-            "Your interview was terminated for leaving the interview screen and cannot be restarted"
-        )
+    if existing is not None:
+        if existing.status == "terminated":
+            raise ValueError(
+                "Your interview was terminated for leaving the interview screen and cannot be restarted"
+            )
+        if existing.status == "in_progress":
+            raise ValueError("You already have an interview in progress")
+        raise ValueError("You have already completed your interview for this application")
 
     # compute_interview_deadline is naive (candidate.created_at comes from
     # MySQL's naive func.now()) — compare against a naive "now" too, not

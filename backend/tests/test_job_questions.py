@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.models.job import JobQuestion
+from tests.conftest import clear_candidate_sessions
 
 
 def test_add_job_question(client, as_hr, job):
@@ -65,6 +66,7 @@ def test_create_interview_session_end_to_end_uses_job_questions(
     # stats) and can already be past the interview deadline — reset it here
     # since this test isn't about deadlines.
     candidate.created_at = datetime.now()
+    clear_candidate_sessions(db_session, candidate.id)
 
     # Seeded jobs already have their own real HR-authored questions — clear
     # them so this test only sees the two it's adding itself.

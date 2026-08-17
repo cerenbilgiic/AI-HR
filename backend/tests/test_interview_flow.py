@@ -8,9 +8,11 @@ from app.models.interview import CandidateAnswer
 from app.models.job import JobQuestion
 from app.schemas.interview import AnswerSubmit
 from app.services import interview_service
+from tests.conftest import clear_candidate_sessions
 
 
 def test_create_session_raises_once_the_deadline_has_passed(db_session, candidate, job):
+    clear_candidate_sessions(db_session, candidate.id)
     # created_at drives compute_interview_deadline (created_at + N days) —
     # backdating it well past settings.interview_deadline_days simulates an
     # expired application without needing to fake "now".
@@ -22,6 +24,7 @@ def test_create_session_raises_once_the_deadline_has_passed(db_session, candidat
 
 
 def test_create_session_copies_job_questions_in_order(db_session, candidate, job):
+    clear_candidate_sessions(db_session, candidate.id)
     # Seeded candidates/demo data are intentionally backdated (so dashboard
     # stats look realistic) and can already be past the interview deadline —
     # reset it here since this test is about question ordering, not deadlines.
@@ -46,6 +49,7 @@ def test_create_session_copies_job_questions_in_order(db_session, candidate, job
 
 
 def test_create_session_raises_when_job_has_no_questions(db_session, candidate, job):
+    clear_candidate_sessions(db_session, candidate.id)
     candidate.created_at = datetime.now()
     db_session.query(JobQuestion).filter(JobQuestion.job_id == job.id).delete()
     db_session.commit()

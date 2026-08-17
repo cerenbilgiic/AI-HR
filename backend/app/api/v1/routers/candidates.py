@@ -1,5 +1,6 @@
 import io
 import uuid
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
@@ -27,7 +28,7 @@ from app.schemas.candidate import (
     ConsentIn,
     ConsentOut,
 )
-from app.schemas.invitation import CandidateImportSummary, InvitationOut
+from app.schemas.invitation import CandidateImportSummary, InvitationEmailOut, InvitationOut
 from app.services import candidate_import_service, candidate_service, invitation_service
 from app.services.cv_text_extraction import extract_cv_text
 from app.services.docx_report import build_cv_analysis_docx
@@ -55,13 +56,23 @@ def create_candidate(data: CandidateCreate, db: Session = Depends(get_db)) -> Ca
 
 @router.get("/me", response_model=CandidateDetailOut)
 def get_my_candidate_profile(
+    db: Session = Depends(get_db),
     current_candidate: Candidate = Depends(get_current_candidate),
 ) -> CandidateDetailOut:
     """Candidate-only: lets the logged-in candidate see their own profile
-    (job_id, interview_deadline) — see pages/candidate/CandidateHome.tsx and
+    (job_id, interview_deadline) — see pages/candidate/Consent.tsx and
     Interview.tsx's pre-start screen. Must stay registered before
     /{candidate_id} below, or FastAPI tries to parse "me" as an int.
+
+    There's no separate "login" step anymore (see EnterInterview.tsx) — the
+    first time a candidate's emailed magic link resolves to a real request
+    is effectively their first login, so that pipeline signal is captured
+    here rather than in a dedicated auth endpoint.
     """
+    if current_candidate.first_login_at is None:
+        current_candidate.first_login_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(current_candidate)
     current_candidate.interview_deadline = candidate_service.compute_interview_deadline(current_candidate)
     return current_candidate
 
@@ -72,9 +83,9 @@ def update_my_candidate_profile(
     db: Session = Depends(get_db),
     current_candidate: Candidate = Depends(get_current_candidate),
 ) -> CandidateDetailOut:
-    """Candidate-only self-service profile edit — see pages/candidate/MyProfile.tsx.
-    Deliberately narrower than the HR-only PUT /candidates/{id}: only
-    full_name/phone, no email (their login credential) or job_id.
+    """Candidate-only self-service profile edit. Deliberately narrower than
+    the HR-only PUT /candidates/{id}: only full_name/phone, no email
+    (that's where their interview link and decision email go) or job_id.
     """
     updated = candidate_service.update_candidate(db, current_candidate, data)
     updated.interview_deadline = candidate_service.compute_interview_deadline(updated)
@@ -161,12 +172,13 @@ def invite_candidates_bulk(
     current_user: User = Depends(get_current_user),
 ) -> list[InvitationOut]:
     results = []
-    for candidate_id in candidate_ids:
-        candidate = _get_candidate_or_404(db, candidate_id)
-        issued = invitation_service.issue_credentials(db, candidate, actor_id=current_user.id)
-        results.append(
-            InvitationOut(candidate_id=candidate.id, login_email=issued.login_email, password=issued.password)
-        )
+    try:
+        for candidate_id in candidate_ids:
+            candidate = _get_candidate_or_404(db, candidate_id)
+            sent = invitation_service.send_interview_link(db, candidate, actor_id=current_user.id)
+            results.append(InvitationOut(candidate_id=sent.candidate_id, sent_to=sent.sent_to))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return results
 
 
@@ -181,6 +193,21 @@ def get_candidate(
     return candidate
 
 
+@router.get("/{candidate_id}/invite-email", response_model=InvitationEmailOut)
+def preview_invite_email(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> InvitationEmailOut:
+    """Lets HR see the invitation email — including the actual magic link —
+    before sending it. No side effects: doesn't touch invited_at or the
+    audit log, doesn't send anything (see pages/hr/CandidateWorkspace.tsx's
+    preview-then-confirm flow)."""
+    candidate = _get_candidate_or_404(db, candidate_id)
+    content = invitation_service.preview_interview_link_email(db, candidate)
+    return InvitationEmailOut(to=content.to, subject=content.subject, body="\n\n".join(content.paragraphs))
+
+
 @router.post("/{candidate_id}/invite", response_model=InvitationOut)
 def invite_candidate(
     candidate_id: int,
@@ -188,8 +215,27 @@ def invite_candidate(
     current_user: User = Depends(get_current_user),
 ) -> InvitationOut:
     candidate = _get_candidate_or_404(db, candidate_id)
-    issued = invitation_service.issue_credentials(db, candidate, actor_id=current_user.id)
-    return InvitationOut(candidate_id=candidate.id, login_email=issued.login_email, password=issued.password)
+    try:
+        sent = invitation_service.send_interview_link(db, candidate, actor_id=current_user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return InvitationOut(candidate_id=sent.candidate_id, sent_to=sent.sent_to)
+
+
+@router.post("/{candidate_id}/reset-interview-deadline", response_model=CandidateDetailOut)
+def reset_interview_deadline(
+    candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CandidateDetailOut:
+    """HR grants a candidate a fresh interview_deadline (see
+    candidate_service.reset_interview_deadline) — for candidates whose
+    original window closed before they ever started, see
+    interview_service.create_session's deadline check."""
+    candidate = _get_candidate_or_404(db, candidate_id)
+    updated = candidate_service.reset_interview_deadline(db, candidate, actor_id=current_user.id)
+    updated.interview_deadline = candidate_service.compute_interview_deadline(updated)
+    return updated
 
 
 def _get_candidate_or_404(db: Session, candidate_id: int) -> Candidate:

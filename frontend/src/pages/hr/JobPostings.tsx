@@ -68,7 +68,15 @@ export default function JobPostings() {
 
   return (
     <div>
-      <h2 className="mb-6 text-xl font-semibold text-slate-100">İş İlanları</h2>
+      <div className="mb-6 flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-slate-100">İş İlanları</h2>
+        <Link
+          to="/hr/jobs/new"
+          className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
+        >
+          + Yeni İlan
+        </Link>
+      </div>
 
       {incoming.length > 0 && (
         <div className="mb-6">

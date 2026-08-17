@@ -45,7 +45,6 @@ def test_import_csv_creates_valid_candidates(db_session, job):
     created = db_session.query(Candidate).filter(Candidate.email == "elif.kara.import@example.com").first()
     assert created is not None
     assert created.job_id == job.id
-    assert created.hashed_password is None
     assert created.phone is None
 
 

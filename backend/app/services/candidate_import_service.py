@@ -108,9 +108,7 @@ def parse_and_import(
 
         candidate_service.create_candidate(
             db,
-            CandidateCreate(
-                full_name=f"{first_name} {last_name}", email=email, phone=phone, job_id=job.id, password=None
-            ),
+            CandidateCreate(full_name=f"{first_name} {last_name}", email=email, phone=phone, job_id=job.id),
         )
         seen_in_file.add(email_key)
         created += 1

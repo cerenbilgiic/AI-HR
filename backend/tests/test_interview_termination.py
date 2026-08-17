@@ -1,3 +1,5 @@
+import pytest
+
 from app.services import interview_service
 
 
@@ -44,6 +46,35 @@ def test_create_session_endpoint_rejects_when_candidate_has_terminated_session(
     response = client.post("/api/v1/interviews")
 
     assert response.status_code == 409
+
+
+def test_create_session_rejects_when_candidate_has_in_progress_session(db_session, candidate, interview_session):
+    # Refreshing the page loses the frontend's in-memory session state, but
+    # the candidate must not be able to get a second, fresh session (new
+    # questions, reset progress) just by hitting "start" again — the
+    # frontend now resumes the existing one instead of calling this, and
+    # this is the hard backend guard against that being bypassed.
+    assert interview_session.status == "in_progress"
+
+    with pytest.raises(ValueError, match="already have an interview in progress"):
+        interview_service.create_session(db_session, candidate)
+
+
+def test_create_session_endpoint_rejects_when_candidate_has_in_progress_session(
+    client, as_candidate, interview_session
+):
+    response = client.post("/api/v1/interviews")
+
+    assert response.status_code == 409
+    assert "already have an interview in progress" in response.json()["detail"]
+
+
+def test_create_session_rejects_when_candidate_already_completed(db_session, candidate, interview_session):
+    interview_session.status = "awaiting_review"
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="already completed"):
+        interview_service.create_session(db_session, candidate)
 
 
 def test_submit_answer_rejects_when_session_not_in_progress(

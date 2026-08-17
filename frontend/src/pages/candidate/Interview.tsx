@@ -1,9 +1,9 @@
 import axios from 'axios'
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
 import { candidateApiClient } from '../../api/client'
 import AIAvatar, { type AvatarGender } from '../../components/AIAvatar'
 import { useAIVoice } from '../../hooks/useAIVoice'
+import { useSpeechRecognition } from '../../hooks/useSpeechRecognition'
 import type { CandidateDetail, InterviewQuestion, InterviewSession, Job } from '../../types'
 
 type AnswerMode = 'voice' | 'written'
@@ -58,8 +58,6 @@ function formatTime(totalSeconds: number): string {
 }
 
 export default function Interview() {
-  const { candidateId } = useParams()
-  const navigate = useNavigate()
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [answerMode, setAnswerMode] = useState<AnswerMode>('voice')
   const [starting, setStarting] = useState(false)
@@ -72,6 +70,7 @@ export default function Interview() {
   const [timeLeft, setTimeLeft] = useState(QUESTION_SECONDS)
   const [error, setError] = useState<string | null>(null)
   const [applyingJob, setApplyingJob] = useState<Job | null>(null)
+  const [checkingExisting, setCheckingExisting] = useState(true)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -88,10 +87,19 @@ export default function Interview() {
   const [canSpeakNow, setCanSpeakNow] = useState(false)
 
   const [avatarGender] = useState<AvatarGender>(getSelectedAvatarGender)
-  const { speak, stop, speaking, muted, setMuted } = useAIVoice(avatarGender)
+  const { speak, stop, speaking, muted, setMuted, supported: ttsSupported } = useAIVoice(avatarGender)
+  const {
+    transcript: voiceTranscript,
+    listening,
+    supported: sttSupported,
+    start: startListening,
+    stop: stopListening,
+    reset: resetTranscript,
+  } = useSpeechRecognition()
 
   const question: InterviewQuestion | null = session?.questions[currentIndex] ?? null
-  const wordCount = answer.trim() ? answer.trim().split(/\s+/).filter(Boolean).length : 0
+  const activeAnswerText = answerMode === 'voice' ? voiceTranscript : answer
+  const wordCount = activeAnswerText.trim() ? activeAnswerText.trim().split(/\s+/).filter(Boolean).length : 0
 
   useEffect(() => {
     if (!question) return
@@ -149,7 +157,15 @@ export default function Interview() {
     // once TTS actually finishes speaking it, which is the more accurate
     // "candidate can start talking now" moment.
     answerWindowStartRef.current = Date.now()
-    setCanSpeakNow(false)
+    resetTranscript()
+    // canSpeakNow otherwise only flips true when `speaking` transitions
+    // true->false (see the effect below) — which never happens if the
+    // browser can't do TTS at all, or the candidate has muted the AI
+    // (speak(), called by the effect above, no-ops in both cases). Don't
+    // leave them permanently stuck on a hidden question with a disabled
+    // answer box in that case.
+    setCanSpeakNow(!ttsSupported || muted)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [question, finished])
 
   useEffect(() => {
@@ -159,6 +175,19 @@ export default function Interview() {
     }
     prevSpeakingRef.current = speaking
   }, [speaking, question, finished])
+
+  // Live captions only run once the AI has actually finished asking the
+  // current question, and only while voice mode is the active answer
+  // method — see useSpeechRecognition's module comment for why this is a
+  // display-only feed, not the scored transcript.
+  useEffect(() => {
+    if (answerMode === 'voice' && canSpeakNow && !finished) {
+      startListening()
+    } else {
+      stopListening()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answerMode, canSpeakNow, finished])
 
   // Shown on the pre-start screen so the candidate knows which position
   // they're applying for and what the interview will assess, before they
@@ -173,19 +202,84 @@ export default function Interview() {
       })
   }, [])
 
+  // Reloading the page loses all in-memory state above (session, currentIndex,
+  // camera/fullscreen), which used to mean the pre-start screen reappeared
+  // and clicking "Mülakatı başlat" silently created a brand new session —
+  // a free restart with fresh questions and lost progress. On mount, check
+  // whether a session already exists for this candidate (create_session's
+  // backend guard now rejects a second one either way) and resume it in
+  // place instead of ever showing the start button again.
   useEffect(() => {
-    if (!question || finished || submitting) return
+    let cancelled = false
+    candidateApiClient
+      .get<InterviewSession[]>('/interviews')
+      .then(({ data }) => {
+        if (cancelled) return
+        const existing = [...data].sort((a, b) => b.id - a.id)[0]
+        if (!existing) return
+        if (existing.status === 'terminated') {
+          setSession(existing)
+          setTerminated(true)
+        } else if (existing.status === 'in_progress') {
+          void resumeSession(existing)
+        } else {
+          setSession(existing)
+          setFinished(true)
+        }
+      })
+      .catch(() => {
+        // Non-fatal — falls back to the normal start screen.
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingExisting(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function resumeSession(existing: InterviewSession) {
+    const firstUnanswered = existing.questions.findIndex((q) => q.answer === null)
+    if (firstUnanswered === -1) {
+      // Every question already has an answer but the session never made it
+      // to "finish" — most likely a refresh landed in the brief gap between
+      // the last answer submit and the finish call. Just complete it; there
+      // is no in-progress recording left to salvage after a reload anyway.
+      setSession(existing)
+      setFinished(true)
+      try {
+        await candidateApiClient.post(`/interviews/${existing.id}/finish`)
+      } catch {
+        // Best-effort, see finishInterview's identical comment.
+      }
+      return
+    }
+    setSession(existing)
+    setCurrentIndex(firstUnanswered)
+    await setupCamera()
+    try {
+      await document.documentElement.requestFullscreen()
+    } catch {
+      // Non-fatal, see start()'s identical comment.
+    }
+  }
+
+  useEffect(() => {
+    // canSpeakNow gates the countdown itself — it doesn't start ticking
+    // until the AI has actually finished asking the question.
+    if (!question || finished || submitting || !canSpeakNow) return
     if (timeLeft <= 0) {
       if (!timeUpFiredRef.current) {
         timeUpFiredRef.current = true
-        void submitAnswer(answer, true)
+        void submitAnswer(answerMode === 'voice' ? voiceTranscript : answer, true)
       }
       return
     }
     const id = setTimeout(() => setTimeLeft((s) => s - 1), 1000)
     return () => clearTimeout(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft, question, finished, submitting])
+  }, [timeLeft, question, finished, submitting, canSpeakNow])
 
   async function setupCamera() {
     try {
@@ -260,6 +354,7 @@ export default function Interview() {
     // No spoken finish message — the interview is over, the AI goes silent
     // (also cancels anything still mid-utterance from the last question).
     stop()
+    stopListening()
     streamRef.current?.getTracks().forEach((track) => track.stop())
   }
 
@@ -281,6 +376,7 @@ export default function Interview() {
   async function terminateSession() {
     if (!session) return
     stop()
+    stopListening()
     try {
       await candidateApiClient.post(`/interviews/${session.id}/terminate`)
     } catch {
@@ -315,7 +411,7 @@ export default function Interview() {
 
   async function submitAnswer(overrideAnswer?: string, isTimeout = false) {
     if (!session || !question || submitting) return
-    const textToSubmit = overrideAnswer ?? answer
+    const textToSubmit = overrideAnswer ?? (answerMode === 'voice' ? voiceTranscript : answer)
 
     // Writing an answer is optional — the candidate may answer purely
     // verbally (the whole interview is recorded regardless). Validation
@@ -346,6 +442,7 @@ export default function Interview() {
         recording_end_offset_seconds: recordingEndOffsetSeconds,
       })
       setAnswer('')
+      resetTranscript()
       if (currentIndex + 1 < session.questions.length) {
         setCurrentIndex((i) => i + 1)
       } else {
@@ -357,6 +454,12 @@ export default function Interview() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  if (checkingExisting) {
+    return (
+      <div className="mx-auto max-w-lg py-16 text-center text-sm text-slate-400">Yükleniyor…</div>
+    )
   }
 
   if (!session) {
@@ -434,15 +537,9 @@ export default function Interview() {
             Durum: Değerlendiriliyor
           </div>
           <p className="mt-4 text-sm text-slate-400">
-            İşe alım ekibimiz başvurunuzu inceleyecek ve sonraki adımlar hakkında sizinle iletişime
-            geçecektir.
+            İşe alım ekibimiz başvurunuzu inceleyecek ve sonraki adımlar hakkında e-posta ile sizinle
+            iletişime geçecektir. Bu sekmeyi kapatabilirsiniz.
           </p>
-          <button
-            onClick={() => navigate(`/interview/${candidateId}/home`)}
-            className="mt-6 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500"
-          >
-            Panele Dön
-          </button>
         </div>
       </div>
     )
@@ -578,7 +675,11 @@ export default function Interview() {
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
           Soru {currentIndex + 1} / {session.questions.length}
         </p>
-        <h2 className="text-lg font-medium text-slate-100">{question?.text}</h2>
+        {canSpeakNow ? (
+          <h2 className="text-lg font-medium text-slate-100">{question?.text}</h2>
+        ) : (
+          <p className="text-sm italic text-slate-500">AI mülakat asistanınız soruyu okuyor…</p>
+        )}
       </div>
 
       <div className="mb-3 flex gap-1 rounded-lg bg-slate-800 p-1 text-sm">
@@ -607,20 +708,41 @@ export default function Interview() {
           verbal-only answer still works fine in Written mode too (both
           submit through the same flow), this is purely a UI affordance. */}
       {answerMode === 'voice' ? (
-        <div className="rounded-xl border border-dashed border-slate-700 bg-slate-800 p-6 text-center text-sm text-slate-400">
-          {canSpeakNow && !speaking
-            ? '🎤 Cevabınızı sözlü olarak verebilirsiniz.'
-            : 'AI sorusunu bitirdiğinde cevap vermeye başlayabilirsiniz.'}
-        </div>
+        !canSpeakNow ? (
+          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-800 p-6 text-center text-sm text-slate-400">
+            AI sorusunu bitirdiğinde cevap vermeye başlayabilirsiniz.
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-800 p-4">
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+              {listening ? '🎤 Dinleniyor — söyledikleriniz aşağıda görünecek' : '🎤 Cevabınızı sözlü olarak verebilirsiniz.'}
+            </p>
+            {/* Read-only — this is a live caption of the spoken answer, not
+                an editable field (see useSpeechRecognition's module comment). */}
+            <div
+              aria-readonly="true"
+              className="min-h-[96px] whitespace-pre-wrap rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+            >
+              {voiceTranscript || (
+                <span className="text-slate-500">Konuşmaya başladığınızda metin burada belirecek…</span>
+              )}
+            </div>
+            {!sttSupported && (
+              <p className="mt-2 text-xs text-slate-500">
+                Tarayıcınız canlı transkripti desteklemiyor — cevabınız yine de kaydediliyor.
+              </p>
+            )}
+          </div>
+        )
       ) : (
         <>
           <textarea
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
             rows={6}
-            disabled={submitting}
+            disabled={submitting || !canSpeakNow}
             className="w-full rounded border border-slate-700 bg-slate-800 text-slate-200 placeholder:text-slate-500 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
-            placeholder="Cevabınızı buraya yazın"
+            placeholder={canSpeakNow ? 'Cevabınızı buraya yazın' : 'AI sorusunu bitirdiğinde yazmaya başlayabilirsiniz'}
           />
           <p className={`mt-1 text-right text-xs ${wordCount > MAX_ANSWER_WORDS ? 'font-medium text-slate-100' : 'text-slate-500'}`}>
             {wordCount} / {MAX_ANSWER_WORDS} kelime
@@ -630,7 +752,7 @@ export default function Interview() {
       {error && <p className="mt-2 text-sm font-medium text-rose-400">{error}</p>}
       <button
         onClick={() => void submitAnswer()}
-        disabled={submitting || wordCount > MAX_ANSWER_WORDS}
+        disabled={submitting || wordCount > MAX_ANSWER_WORDS || !canSpeakNow}
         className="mt-4 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500 disabled:opacity-40"
       >
         {submitting

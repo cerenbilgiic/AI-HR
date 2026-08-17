@@ -9,7 +9,12 @@ from app.models.candidate import Candidate
 from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-candidate_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/candidate-login")
+# tokenUrl is purely a Swagger-docs hint for the /docs "Authorize" form and
+# has no runtime effect — candidates never have a password-flow login to
+# point it at (their token comes from the emailed magic link, see
+# invitation_service.send_interview_link), so this just points at the
+# nearest real endpoint for docs purposes.
+candidate_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 def get_current_user(

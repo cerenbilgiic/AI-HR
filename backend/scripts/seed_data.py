@@ -2,10 +2,12 @@
 
 All data is hand-written/synthetic, not AI-generated -- no call to the AI
 provider is made here. Rerunning this script resets the seeded tables
-before inserting fresh data. Seeded HR users and candidates can all log
-in with password "Password123!" (HR via /auth/login, candidates via
-/auth/candidate-login). Seed content (job postings, interview Q&A, names)
-is in Turkish; code/comments stay in English per the rest of the codebase.
+before inserting fresh data. Seeded HR users can log in with password
+"Password123!" via /auth/login — seeded candidates have no password at all
+(see invitation_service.send_interview_link; HR issues them a magic link
+from the Candidates screen). Seed content (job postings, interview Q&A,
+names) is in Turkish; code/comments stay in English per the rest of the
+codebase.
 
 Run with: python -m scripts.seed_data
 """
@@ -381,11 +383,6 @@ def run() -> None:
                     full_name=full_name,
                     email=f"{_ascii(first)}.{_ascii(last)}@example.com",
                     phone=_phone(candidate_index),
-                    # Seed candidates get a login (assigned, not their
-                    # personal email — see invitation_service.py) up front
-                    # so they're testable without a separate invite step.
-                    login_email=f"{_ascii(first)}.{_ascii(last)}@aday.mulakat.internal",
-                    hashed_password=hash_password(SEED_PASSWORD),
                     job_id=job.id,
                     skills=[CandidateSkill(name=name) for name in skill_names],
                     cvs=[CandidateCV(file_path=f"/mock-cvs/{_ascii(first)}-{_ascii(last)}.pdf", parsed_text=cv_text)],

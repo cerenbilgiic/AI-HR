@@ -15,6 +15,15 @@ class Job(Base, TimestampMixin):
     location: Mapped[str] = mapped_column(String(100), nullable=True)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
+    # AI-generated, job-specific evaluation rubric — populated by a
+    # background task right after the job is created (see
+    # job_service.generate_evaluation_criteria / jobs.py's create_job) and
+    # fed into report_service's final-report prompt so candidates for this
+    # job are judged against criteria tailored to the actual role, not just
+    # the generic six-competency framework. None until that task finishes
+    # (or if it fails — best-effort, never blocks job creation).
+    evaluation_criteria: Mapped[str] = mapped_column(Text, nullable=True)
+
     created_by: Mapped["User"] = relationship()
     skills: Mapped[list["JobSkill"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"

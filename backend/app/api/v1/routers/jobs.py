@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_current_user, role_name
@@ -129,10 +129,15 @@ def transfer_job(
 @router.post("", response_model=JobOut, status_code=status.HTTP_201_CREATED)
 def create_job(
     data: JobCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> JobOut:
-    return job_service.create_job(db, data, created_by_id=current_user.id)
+    job = job_service.create_job(db, data, created_by_id=current_user.id)
+    # The AI call can take a while on a cold local model — don't block the
+    # create response on it. See job_service.generate_evaluation_criteria.
+    background_tasks.add_task(job_service.generate_evaluation_criteria, job.id)
+    return job
 
 
 @router.get("/{job_id}", response_model=JobOut)

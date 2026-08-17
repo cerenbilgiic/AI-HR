@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../../api/client'
 import HrStatusBadge from '../../components/HrStatusBadge'
+import { useEvaluationsVersion } from '../../hooks/useEvaluationsVersion'
 import type { Candidate, InterviewSession, Job, JobTransferRequest } from '../../types'
+import { evaluateSession, isEvaluating } from '../../utils/evaluationTracker'
 
 interface HrUser {
   id: number
@@ -33,8 +35,8 @@ export default function JobDetail() {
   const [job, setJob] = useState<Job | null>(null)
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [sessions, setSessions] = useState<InterviewSession[]>([])
-  const [evaluatingId, setEvaluatingId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  useEvaluationsVersion()
 
   const [newQuestion, setNewQuestion] = useState('')
   const [addingQuestion, setAddingQuestion] = useState(false)
@@ -90,18 +92,26 @@ export default function JobDetail() {
   }
 
   async function evaluate(sessionId: number) {
-    setEvaluatingId(sessionId)
     setError(null)
     try {
       // generate-report (not the older evaluate) is what actually produces
       // overall_score/competency_scores — the "Evaluate" button should
       // always leave the candidate with a real score, not just a summary.
-      await apiClient.post(`/interviews/${sessionId}/generate-report`)
-      navigate(`/hr/interviews/${sessionId}`)
+      // No forced navigate() here (unlike an earlier version of this
+      // function) — the AI call this triggers keeps running server-side
+      // however long it takes regardless of what the browser does, but a
+      // navigate() awaited after it would fire even if HR had since
+      // clicked away to another page entirely, yanking them back here
+      // mid-task. Re-fetching in place instead lets them keep browsing
+      // freely; the status/"Raporu Görüntüle" button just updates once
+      // it's done, same pattern as InterviewList.tsx's evaluate().
+      // evaluateSession (not a raw apiClient.post) tracks the in-progress
+      // state globally, not just in this component's own state — so it
+      // survives navigating to another sidebar tab and back too.
+      await evaluateSession(sessionId)
+      loadSessions()
     } catch {
       setError('Bu mülakat değerlendirilemedi. Lütfen tekrar deneyin.')
-    } finally {
-      setEvaluatingId(null)
     }
   }
 
@@ -213,6 +223,29 @@ export default function JobDetail() {
         </div>
       </div>
 
+      <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4 shadow-sm">
+        <h3 className="mb-2 text-sm font-medium text-slate-100">AI Değerlendirme Kriterleri</h3>
+        {job.evaluation_criteria ? (
+          <ul className="space-y-1 text-sm text-slate-300">
+            {job.evaluation_criteria
+              .split('\n')
+              .map((line) => line.replace(/^-\s*/, '').trim())
+              .filter(Boolean)
+              .map((line, i) => (
+                <li key={i} className="flex gap-2">
+                  <span className="text-indigo-400">•</span>
+                  <span>{line}</span>
+                </li>
+              ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-slate-500">
+            AI, bu pozisyona özgü değerlendirme kriterlerini arka planda oluşturuyor — birazdan burada
+            görünecek. Bu, adayları değerlendirirken kullanılacak.
+          </p>
+        )}
+      </div>
+
       <h3 className="mb-3 text-base font-medium text-slate-100">Mülakat Soruları</h3>
       <p className="mb-2 text-xs text-slate-500">
         Bu pozisyona başvuran her adaya bu sorular, bu sırayla sorulur.
@@ -277,10 +310,10 @@ export default function JobDetail() {
               {session?.status === 'awaiting_review' && (
                 <button
                   onClick={() => void evaluate(session.id)}
-                  disabled={evaluatingId === session.id}
+                  disabled={isEvaluating(session.id)}
                   className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
                 >
-                  {evaluatingId === session.id ? 'Değerlendiriliyor…' : 'Değerlendir'}
+                  {isEvaluating(session.id) ? 'Değerlendiriliyor…' : 'Değerlendir'}
                 </button>
               )}
               {session?.status === 'completed' && (

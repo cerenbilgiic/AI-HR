@@ -1,7 +1,8 @@
+import axios from 'axios'
 import { Download } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import apiClient from '../api/client'
-import type { Candidate, InterviewReport, InterviewSession, Job } from '../types'
+import type { Candidate, DecisionEmail, InterviewReport, InterviewSession, Job } from '../types'
 import HrStatusBadge from './HrStatusBadge'
 import RecommendationBadge, { RECOMMENDATION_LABELS } from './RecommendationBadge'
 import { COMPETENCY_LABELS } from '../utils/competency'
@@ -66,6 +67,10 @@ export default function InterviewDetailPanel({ sessionId }: { sessionId: string 
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [pdfDownloading, setPdfDownloading] = useState(false)
   const [pdfError, setPdfError] = useState<string | null>(null)
+  const [decisionEmail, setDecisionEmail] = useState<DecisionEmail | null>(null)
+  const [emailSent, setEmailSent] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [emailError, setEmailError] = useState<string | null>(null)
 
   useEffect(() => {
     setActiveTab('review')
@@ -117,6 +122,24 @@ export default function InterviewDetailPanel({ sessionId }: { sessionId: string 
     }
   }, [sessionId, session?.recording_path])
 
+  // Once HR has set a final decision, load the matching result-email draft
+  // so they can see exactly what will go out before sending it — see
+  // reports.py's decision-email preview endpoint (same template function
+  // the actual send uses, so this is never out of sync with what's sent).
+  useEffect(() => {
+    setDecisionEmail(null)
+    setEmailSent(false)
+    setEmailError(null)
+    if (!report?.hr_decision) return
+    apiClient
+      .get<DecisionEmail>(`/reports/session/${sessionId}/decision-email`)
+      .then((res) => setDecisionEmail(res.data))
+      .catch(() => {
+        // Non-fatal — HR can still act via the decision buttons; the send
+        // button below will surface a clearer error if they try to send.
+      })
+  }, [sessionId, report?.hr_decision])
+
   async function setFinalDecision(hrDecision: string) {
     setSavingDecision(true)
     setDecisionError(null)
@@ -129,6 +152,21 @@ export default function InterviewDetailPanel({ sessionId }: { sessionId: string 
       setDecisionError('Nihai karar kaydedilemedi. Lütfen tekrar deneyin.')
     } finally {
       setSavingDecision(false)
+    }
+  }
+
+  async function handleSendDecisionEmail() {
+    setSendingEmail(true)
+    setEmailError(null)
+    try {
+      const { data } = await apiClient.post<DecisionEmail>(`/reports/session/${sessionId}/send-decision-email`)
+      setDecisionEmail(data)
+      setEmailSent(true)
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
+      setEmailError(typeof detail === 'string' ? detail : 'Sonuç e-postası gönderilemedi.')
+    } finally {
+      setSendingEmail(false)
     }
   }
 
@@ -381,6 +419,41 @@ export default function InterviewDetailPanel({ sessionId }: { sessionId: string 
                 </div>
                 {decisionError && <p className="mt-2 text-xs font-medium text-rose-400">{decisionError}</p>}
               </div>
+
+              {report.hr_decision && (
+                <div className="rounded-lg border border-slate-800 bg-slate-800/40 p-3">
+                  <h4 className="mb-2 text-sm font-medium text-slate-100">Sonuç E-postası</h4>
+                  {decisionEmail ? (
+                    <>
+                      <p className="text-xs text-slate-500">
+                        Alıcı: <span className="text-slate-300">{decisionEmail.to}</span>
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Konu: <span className="text-slate-300">{decisionEmail.subject}</span>
+                      </p>
+                      <p className="mt-2 whitespace-pre-line rounded border border-slate-700 bg-slate-900 p-2 text-xs text-slate-300">
+                        {decisionEmail.body}
+                      </p>
+                      {emailSent ? (
+                        <p className="mt-2 text-xs font-medium text-emerald-400">✓ Gönderildi.</p>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void handleSendDecisionEmail()}
+                          disabled={sendingEmail}
+                          className="mt-2 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                        >
+                          {sendingEmail ? 'Gönderiliyor…' : 'Sonuç E-postasını Gönder'}
+                        </button>
+                      )}
+                      {emailError && <p className="mt-2 text-xs font-medium text-rose-400">{emailError}</p>}
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-500">Taslak hazırlanıyor…</p>
+                  )}
+                </div>
+              )}
+
               {report.strengths && report.strengths.length > 0 && (
                 <div>
                   <h4 className="mb-1 text-sm font-medium text-slate-100">Güçlü Yönler</h4>

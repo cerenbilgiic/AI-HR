@@ -28,7 +28,7 @@ def create_user(
     if role_name(current_user) != "admin" and data.role != "hr":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="İK Müdürü yalnızca çalışan (İK Yöneticisi) hesabı oluşturabilir.",
+            detail="İK Müdürü yalnızca çalışan (İK) hesabı oluşturabilir.",
         )
     try:
         return user_service.create_user(db, data)

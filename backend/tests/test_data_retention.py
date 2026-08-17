@@ -100,7 +100,14 @@ def test_run_retention_sweep_applies_each_window_independently(
 
     result = data_retention.run_retention_sweep(db_session, fake_storage)
 
-    assert result == {"media_deleted": 1, "transcripts_cleared": 0, "reports_deleted": 1}
+    # The dev DB this suite runs against can already carry other real,
+    # genuinely-stale media from manual testing (same caveat as
+    # test_audit_log.py's audit-log count) — media_deleted only asserts
+    # "at least this test's own row", the other two windows have no such
+    # pre-existing rows so stay exact.
+    assert result["media_deleted"] >= 1
+    assert result["transcripts_cleared"] == 0
+    assert result["reports_deleted"] == 1
     db_session.refresh(answer)
     assert answer.audio_path is None
     assert answer.transcript == "keep this text"

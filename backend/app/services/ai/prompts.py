@@ -127,6 +127,47 @@ Yanıtı "summary" ve "recommendation" anahtarlarıyla JSON olarak ver.
 "summary" alanını TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
 """
 
+EVALUATION_CRITERIA_PROMPT = """Sen perakende sektöründe işe alım süreçlerine özelleşmiş, deneyimli bir İnsan Kaynakları uzmanısın.
+
+Görevin, aşağıdaki iş ilanı için adayların mülakatta hangi somut kriterlere göre
+değerlendirileceğini belirlemektir. Bu kriterler, bu pozisyona başvuran her adayın
+mülakatını değerlendirecek yapay zekâ değerlendiricisine rehberlik edecek — genel
+geçer değil, bu pozisyona özgü ve profesyonel olmalı.
+
+POZİSYON:
+{job_title}
+
+İŞ İLANI:
+{job_description}
+
+GEREKLİ YETKİNLİKLER:
+{required_skills}
+
+Bu pozisyona özgü, somut ve gözlemlenebilir 5 ila 8 arası değerlendirme kriteri üret.
+
+Kurallar:
+
+- Her kriter bu pozisyona özgü olmalı (jenerik "iyi iletişim" değil, bu rolde
+  iletişimin ne anlama geldiğini belirten somut bir ifade).
+- Mülakat cevaplarında aranacak somut davranış, bilgi veya deneyimi belirt.
+- Profesyonel ve tarafsız bir dille yaz.
+- Yaş, cinsiyet, etnik köken, din, sağlık durumu gibi korunan özelliklere değinme.
+- Yalnızca işle ilgili kriterler üret.
+
+TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
+Yalnızca geçerli JSON döndür, markdown veya açıklama ekleme.
+
+"criteria" listesindeki her öge, aşağıdaki örnekte olduğu gibi TEK BİR DÜZ
+METİN (string) olmalıdır — {{"criterion_name": "...", "description": "..."}}
+gibi bir nesne DEĞİL. Kriterin adını ve ne arandığını aynı cümle içinde ver.
+
+{{
+  "criteria": [
+    "Kasada müşteriyle göz teması kurarak hızlı ve doğru işlem yapabilme"
+  ]
+}}
+"""
+
 CV_SKILL_EXTRACTION_PROMPT = """İş ilanı:
 {job_description}
 
@@ -172,6 +213,9 @@ Verilmeyen hiçbir bilgiyi uydurma veya varsayma.
 GEREKLİ YETKİNLİKLER:
 {required_skills}
 
+BU POZİSYONA ÖZGÜ DEĞERLENDİRME KRİTERLERİ (öncelikli olarak bunlara göre değerlendir):
+{evaluation_criteria}
+
 ADAY PROFİLİ:
 {candidate_profile}
 
@@ -196,10 +240,17 @@ Aşağıdaki yetkinlikleri değerlendir:
 
 Değerlendirme kuralları:
 
+- Yukarıdaki "BU POZİSYONA ÖZGÜ DEĞERLENDİRME KRİTERLERİ" bölümünü, aşağıdaki
+  6 yetkinliği puanlarken ve "strengths"/"development_areas"/"evidence"
+  alanlarını yazarken temel referans olarak kullan — genel geçer
+  değerlendirme yerine bu pozisyona özgü, somut gözlemlere dayalı bir
+  değerlendirme yap.
 - Her puanı 0 ile 100 arasında ver.
 - Puanları mülakat cevaplarındaki kanıtlarla tutarlı tut.
 - Aday hakkında bilgi uydurma.
 - Kanıt olmadan yetkinlikler hakkında varsayımda bulunma.
+- Bir yetkinlik için hiç kanıt yoksa (ilgili sorular cevapsız bırakıldıysa veya cevap konuyla tamamen alakasızsa), o yetkinliğe orta düzey bir puan verme — kanıt yokluğu düşük puan (0-20 aralığı) anlamına gelir, asla ortalamaya yuvarlanan bir tahmin değil.
+- Adayın cevapladığı soru sayısı azsa, genel puanı buna göre düşük tut — cevapsız bırakılan sorular sanki ortalama bir cevap verilmiş gibi telafi edilmemelidir.
 - Korunan veya kişisel özellikleri değerlendirme kriteri olarak kullanma.
 - Yaş, cinsiyet, etnik köken, din, sağlık durumu veya benzeri kişisel özellikleri değerlendirme.
 - Yalnızca işle ilgili yetkinlikleri değerlendir.

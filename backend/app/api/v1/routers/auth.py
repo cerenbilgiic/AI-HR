@@ -1,11 +1,8 @@
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import create_access_token, verify_password
-from app.models.candidate import Candidate
 from app.models.user import User
 from app.schemas.auth import LoginRequest, Token
 
@@ -22,18 +19,7 @@ def login(data: LoginRequest, db: Session = Depends(get_db)) -> Token:
     return Token(access_token=token)
 
 
-@router.post("/candidate-login", response_model=Token)
-def candidate_login(data: LoginRequest, db: Session = Depends(get_db)) -> Token:
-    """Candidates authenticate with the system-assigned login_email only
-    (see invitation_service.issue_credentials) — their personal email
-    (Candidate.email) is never a valid login credential, by design."""
-    candidate = db.query(Candidate).filter(Candidate.login_email == data.email).first()
-    if not candidate or not candidate.hashed_password or not verify_password(data.password, candidate.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    if candidate.first_login_at is None:
-        candidate.first_login_at = datetime.now(timezone.utc)
-        db.commit()
-
-    token = create_access_token(subject=str(candidate.id), token_type="candidate")
-    return Token(access_token=token, candidate_id=candidate.id)
+# There is no candidate-login endpoint anymore — candidates never
+# authenticate with a password. They're only ever issued a token by
+# invitation_service.send_interview_link, embedded in the emailed magic
+# link (see pages/candidate/EnterInterview.tsx).

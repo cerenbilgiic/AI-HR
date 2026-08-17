@@ -1,12 +1,16 @@
 import axios from 'axios'
 import { useEffect, useMemo, useState } from 'react'
-import apiClient from '../../api/client'
+import { adminApiClient } from '../../api/client'
 import type { AuditLogEntry } from '../../types'
 
 const ACTION_LABELS: Record<string, string> = {
   credentials_issued: 'Giriş bilgileri oluşturuldu',
   credentials_reissued: 'Giriş bilgileri yeniden oluşturuldu',
   candidates_imported: 'Adaylar içe aktarıldı',
+  job_transfer_requested: 'İlan devri talep edildi',
+  job_transfer_approved: 'İlan devri onaylandı',
+  job_transfer_rejected: 'İlan devri reddedildi',
+  interview_deadline_reset: 'Mülakat süresi yenilendi',
 }
 
 function actionLabel(action: string): string {
@@ -21,14 +25,14 @@ function detailSummary(detail: Record<string, unknown> | null): string | null {
   return null
 }
 
-export default function AuditLog() {
+export default function AdminAuditLog() {
   const [entries, setEntries] = useState<AuditLogEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [forbidden, setForbidden] = useState(false)
   const [search, setSearch] = useState('')
 
   useEffect(() => {
-    apiClient
+    adminApiClient
       .get<AuditLogEntry[]>('/audit-logs')
       .then((res) => setEntries(res.data))
       .catch((err) => {

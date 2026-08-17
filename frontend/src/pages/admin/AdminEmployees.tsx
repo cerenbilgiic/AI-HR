@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { useEffect, useState } from 'react'
-import apiClient from '../../api/client'
+import { adminApiClient } from '../../api/client'
 import { ROLE_LABELS } from '../../utils/roles'
 
 interface HrUser {
@@ -10,12 +10,10 @@ interface HrUser {
   role: string
 }
 
-// This page is only ever reached as hr_manager now (admin has its own
-// separate /admin/employees, see pages/admin/AdminEmployees.tsx) — an
-// hr_manager can only ever grant/see the base "hr" role, the backend
-// enforces this too (users.py's create/update checks), this is just not
-// offering an option that would 403.
-const ASSIGNABLE_ROLES = ['hr']
+// This page is only ever reached as an admin (see AdminProtectedRoute) —
+// unlike pages/hr/Employees.tsx (hr_manager's version, scoped to granting
+// only "hr"), an admin can grant any tier.
+const ASSIGNABLE_ROLES = ['hr', 'hr_manager', 'admin']
 
 interface EditForm {
   full_name: string
@@ -28,7 +26,7 @@ function toEditForm(user: HrUser): EditForm {
   return { full_name: user.full_name, email: user.email, role: user.role, password: '' }
 }
 
-export default function Employees() {
+export default function AdminEmployees() {
   const [me, setMe] = useState<HrUser | null>(null)
   const [users, setUsers] = useState<HrUser[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -45,7 +43,7 @@ export default function Employees() {
   const [saving, setSaving] = useState(false)
 
   function load() {
-    return Promise.all([apiClient.get<HrUser>('/users/me'), apiClient.get<HrUser[]>('/users')])
+    return Promise.all([adminApiClient.get<HrUser>('/users/me'), adminApiClient.get<HrUser[]>('/users')])
       .then(([meRes, usersRes]) => {
         setMe(meRes.data)
         setUsers(usersRes.data)
@@ -67,7 +65,7 @@ export default function Employees() {
     setAdding(true)
     setAddError(null)
     try {
-      await apiClient.post('/users', addForm)
+      await adminApiClient.post('/users', addForm)
       setAddForm({ full_name: '', email: '', password: '', role: 'hr' })
       setShowAddForm(false)
       await load()
@@ -90,7 +88,7 @@ export default function Employees() {
     setSaving(true)
     setEditError(null)
     try {
-      await apiClient.put(`/users/${userId}`, {
+      await adminApiClient.put(`/users/${userId}`, {
         full_name: editForm.full_name,
         email: editForm.email,
         role: editForm.role,
@@ -110,7 +108,7 @@ export default function Employees() {
   async function handleDelete(user: HrUser) {
     if (!window.confirm(`${user.full_name} silinsin mi? Bu işlem geri alınamaz.`)) return
     try {
-      await apiClient.delete(`/users/${user.id}`)
+      await adminApiClient.delete(`/users/${user.id}`)
       await load()
     } catch (err) {
       const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
@@ -219,13 +217,8 @@ export default function Employees() {
                     <td className="px-4 py-3">
                       <select
                         value={editForm.role}
-                        // Only an admin can actually change a role (backend-enforced,
-                        // see users.py's update_user) — an hr_manager, the only role
-                        // that reaches this page now, can never change it, so this
-                        // stays disabled unconditionally rather than pretending it's
-                        // editable.
                         onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                        disabled
+                        disabled={isSelf}
                         className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-200 disabled:opacity-50"
                       >
                         {ASSIGNABLE_ROLES.map((role) => (
@@ -296,6 +289,13 @@ export default function Employees() {
                 </tr>
               )
             })}
+            {users.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-500">
+                  Henüz çalışan yok.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

@@ -80,3 +80,15 @@ class InterviewReportUpdate(BaseModel):
     # field. This is deliberately not `recommendation`: that field is the
     # AI's advisory output and must never be overwritten by this endpoint.
     hr_decision: RecommendationEnum | None = None
+
+
+class DecisionEmailOut(BaseModel):
+    """The result-email draft matching InterviewReport.hr_decision — see
+    GET .../decision-email (preview) and POST .../send-decision-email.
+    `body` is plain text, one string per paragraph already joined — the
+    single source of truth for both the HR-facing preview and the actual
+    sent email (see email_service.build_decision_email)."""
+
+    to: str
+    subject: str
+    body: str
