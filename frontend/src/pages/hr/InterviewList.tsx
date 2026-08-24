@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../../api/client'
 import HrStatusBadge from '../../components/HrStatusBadge'
-import RecommendationBadge from '../../components/RecommendationBadge'
+import Pagination from '../../components/Pagination'
+import RecommendationBadge, { effectiveRecommendation } from '../../components/RecommendationBadge'
 import { useEvaluationsVersion } from '../../hooks/useEvaluationsVersion'
 import type { Candidate, InterviewSession, Job } from '../../types'
 import { evaluateSession, isEvaluating } from '../../utils/evaluationTracker'
+
+const PAGE_SIZE = 15
 
 export default function InterviewList() {
   const navigate = useNavigate()
@@ -18,6 +21,7 @@ export default function InterviewList() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [positionFilter, setPositionFilter] = useState('all')
   const [evaluateError, setEvaluateError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
   useEvaluationsVersion()
 
   function loadSessions() {
@@ -78,6 +82,13 @@ export default function InterviewList() {
     return result.sort((a, b) => new Date(b.session.created_at).getTime() - new Date(a.session.created_at).getTime())
   }, [sessions, candidateById, jobById, search, statusFilter, positionFilter])
 
+  useEffect(() => {
+    setPage(1)
+  }, [search, statusFilter, positionFilter])
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
   if (error) return <p className="text-sm font-medium text-rose-400">{error}</p>
   if (!sessions) return <p className="text-sm text-slate-500">Mülakatlar yükleniyor...</p>
 
@@ -134,7 +145,7 @@ export default function InterviewList() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
-            {rows.map(({ session, candidate, job }) => (
+            {pageRows.map(({ session, candidate, job }) => (
               <tr key={session.id} className="hover:bg-slate-800">
                 <td className="px-4 py-3 text-slate-100">{candidate?.full_name ?? 'Bilinmiyor'}</td>
                 <td className="px-4 py-3 text-slate-300">{job?.title ?? '—'}</td>
@@ -142,7 +153,11 @@ export default function InterviewList() {
                 <td className="px-4 py-3"><HrStatusBadge status={session.status} /></td>
                 <td className="px-4 py-3 text-slate-300">{session.overall_score ?? '—'}</td>
                 <td className="px-4 py-3">
-                  {session.recommendation ? <RecommendationBadge recommendation={session.recommendation} /> : '—'}
+                  {effectiveRecommendation(session) ? (
+                    <RecommendationBadge recommendation={effectiveRecommendation(session)!} />
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
@@ -175,6 +190,7 @@ export default function InterviewList() {
           </tbody>
         </table>
       </div>
+      <Pagination page={page} totalPages={totalPages} onChange={setPage} />
     </div>
   )
 }

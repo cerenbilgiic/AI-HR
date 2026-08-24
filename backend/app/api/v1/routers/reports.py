@@ -204,11 +204,21 @@ def send_decision_email(
     current_user: User = Depends(get_current_user),
 ) -> DecisionEmailOut:
     candidate, subject, paragraphs = _decision_email_content(db, session_id)
+    report = interview_service.get_report(db, session_id)
+    # report can't be None here — _decision_email_content above already 404s
+    # if it is — but re-fetched separately since that helper only returns
+    # the built email content, not the report row itself.
+    if report.decision_email_sent_for == report.hr_decision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Bu karar için sonuç e-postası zaten gönderildi. Tekrar göndermek için önce kararı değiştirin.",
+        )
     try:
         send_email(candidate.email, subject, paragraphs)
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
+    report.decision_email_sent_for = report.hr_decision
     db.add(
         AuditLog(
             actor_type="hr",

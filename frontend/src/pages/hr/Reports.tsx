@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../../api/client'
-import RecommendationBadge from '../../components/RecommendationBadge'
+import RecommendationBadge, { effectiveRecommendation } from '../../components/RecommendationBadge'
 import type { Candidate, InterviewSession, Job } from '../../types'
 
 const MAX_COMPARE = 4
@@ -52,7 +52,7 @@ export default function Reports() {
       result = result.filter((r) => String(r.session.job_id) === positionFilter)
     }
     if (recommendationFilter !== 'all') {
-      result = result.filter((r) => r.session.recommendation === recommendationFilter)
+      result = result.filter((r) => effectiveRecommendation(r.session) === recommendationFilter)
     }
     if (minScore.trim()) {
       const min = Number(minScore)
@@ -196,7 +196,11 @@ export default function Reports() {
                 <td className="px-4 py-3 text-slate-300">{job?.title ?? '—'}</td>
                 <td className="px-4 py-3 text-slate-300">{session.overall_score} / 100</td>
                 <td className="px-4 py-3">
-                  {session.recommendation ? <RecommendationBadge recommendation={session.recommendation} /> : '—'}
+                  {effectiveRecommendation(session) ? (
+                    <RecommendationBadge recommendation={effectiveRecommendation(session)!} />
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td className="px-4 py-3 text-slate-300">{new Date(session.updated_at).toLocaleDateString()}</td>
                 <td className="px-4 py-3">

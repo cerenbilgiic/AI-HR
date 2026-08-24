@@ -5,6 +5,7 @@ import pytest
 from app.models.ai_evaluation import AIEvaluation
 from app.models.ai_score import InterviewReport
 from app.models.interview import CandidateAnswer, InterviewQuestion, InterviewSession
+from app.schemas.report import CompetencyScores
 from app.services import report_service
 from app.services.ai.base import AIResponseError
 
@@ -59,9 +60,36 @@ def _build_blank_session(db_session, candidate, job, with_blank_rows: bool) -> I
     return session
 
 
+def test_compute_overall_score_averages_competency_scores():
+    scores = CompetencyScores(
+        communication=100,
+        technical_competency=0,
+        problem_solving=50,
+        teamwork=50,
+        customer_service=50,
+        role_fit=50,
+    )
+    assert report_service._compute_overall_score(scores) == 50
+
+
+def test_compute_overall_score_rounds_to_nearest_int():
+    scores = CompetencyScores(
+        communication=80,
+        technical_competency=70,
+        problem_solving=75,
+        teamwork=82,
+        customer_service=85,
+        role_fit=77,
+    )
+    # (80+70+75+82+85+77)/6 = 78.1666...
+    assert report_service._compute_overall_score(scores) == 78
+
+
 def _valid_llm_response(**overrides):
+    # No "overall_score" key — the model is never asked for one anymore
+    # (see local_llm.py's generate_final_report); report_service computes
+    # it in Python from competency_scores, see test_generate_report_success.
     response = {
-        "overall_score": 78,
         "recommendation": "recommended",
         "competency_scores": {
             "communication": 80,
@@ -98,6 +126,8 @@ def test_generate_report_success(db_session, candidate, job, mocker):
 
     report = report_service.generate_final_report(db_session, session.id)
 
+    # (80 + 70 + 75 + 82 + 85 + 77) / 6, rounded — computed in Python from
+    # competency_scores, not supplied by the mocked provider.
     assert report.overall_score == 78
     assert report.recommendation == "recommended"
     assert report.competency_scores["customer_service"] == 85
@@ -162,9 +192,45 @@ def test_generate_report_returns_existing_without_regenerating(db_session, candi
     provider.generate_final_report.assert_called_once()
 
 
-def test_generate_report_rejects_out_of_range_score(db_session, candidate, job, mocker):
+def test_generate_report_dedupes_identical_evidence_text_across_competencies(db_session, candidate, job, mocker):
+    # Regression: small local models sometimes cite the exact same quote
+    # for more than one competency when the interview doesn't give them
+    # enough distinct material — the report must not show that quote twice.
     session = _build_five_question_session(db_session, candidate, job)
-    _mock_provider(mocker, response=_valid_llm_response(overall_score=150))
+    duplicate_quote = "Described calmly resolving a difficult customer situation."
+    _mock_provider(
+        mocker,
+        response=_valid_llm_response(
+            evidence=[
+                {"competency": "customer_service", "evidence": duplicate_quote},
+                {"competency": "problem_solving", "evidence": duplicate_quote},
+                {"competency": "communication", "evidence": "Explained the greeting process clearly."},
+            ]
+        ),
+    )
+
+    report = report_service.generate_final_report(db_session, session.id)
+
+    assert len(report.evidence) == 2
+    assert report.evidence[0]["competency"] == "customer_service"
+    assert report.evidence[1]["competency"] == "communication"
+
+
+def test_generate_report_rejects_out_of_range_competency_score(db_session, candidate, job, mocker):
+    session = _build_five_question_session(db_session, candidate, job)
+    _mock_provider(
+        mocker,
+        response=_valid_llm_response(
+            competency_scores={
+                "communication": 80,
+                "technical_competency": 70,
+                "problem_solving": 75,
+                "teamwork": 82,
+                "customer_service": 150,
+                "role_fit": 77,
+            }
+        ),
+    )
 
     with pytest.raises(AIResponseError):
         report_service.generate_final_report(db_session, session.id)

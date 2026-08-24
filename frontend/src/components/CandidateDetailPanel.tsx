@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import apiClient from '../api/client'
 import type { CandidateDetail as CandidateDetailType, InterviewSession, Job } from '../types'
 import HrStatusBadge from './HrStatusBadge'
-import RecommendationBadge from './RecommendationBadge'
+import RecommendationBadge, { effectiveRecommendation } from './RecommendationBadge'
 
 // The recording-url/file-url endpoints return an already-/api/v1-prefixed
 // path (see LocalFileStorage.presigned_url) but apiClient's baseURL already
@@ -142,8 +142,8 @@ export default function CandidateDetailPanel({
           <div>
             <dt className="text-xs uppercase text-slate-500">Tavsiye</dt>
             <dd className="mt-1">
-              {latestSession?.recommendation ? (
-                <RecommendationBadge recommendation={latestSession.recommendation} />
+              {latestSession && effectiveRecommendation(latestSession) ? (
+                <RecommendationBadge recommendation={effectiveRecommendation(latestSession)!} />
               ) : (
                 <span className="text-slate-500">—</span>
               )}

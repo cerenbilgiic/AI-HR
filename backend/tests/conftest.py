@@ -59,7 +59,7 @@ def clear_candidate_sessions(db_session: SASession, candidate_id: int) -> None:
 
 
 class FakeMediaStorage(MediaStorage):
-    """In-memory stand-in for MinIO, so tests never touch a real bucket."""
+    """In-memory stand-in for MediaStorage, so tests never touch the real filesystem."""
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
@@ -68,7 +68,7 @@ class FakeMediaStorage(MediaStorage):
 
     def upload(self, object_key: str, data: io.BytesIO, content_type: str, size: int) -> None:
         if self.fail_upload:
-            raise RuntimeError("simulated MinIO connection failure")
+            raise RuntimeError("simulated storage connection failure")
         self.objects[object_key] = data.read()
 
     def delete(self, object_key: str) -> None:
@@ -76,7 +76,7 @@ class FakeMediaStorage(MediaStorage):
         self.objects.pop(object_key, None)
 
     def presigned_url(self, object_key: str, expires_seconds: int = 300) -> str:
-        return f"http://fake-minio.local/{object_key}?expires={expires_seconds}"
+        return f"http://fake-storage.local/{object_key}?expires={expires_seconds}"
 
     def download_to_path(self, object_key: str, dest_path: str) -> None:
         with open(dest_path, "wb") as f:

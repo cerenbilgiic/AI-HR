@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import apiClient from '../../api/client'
+import Pagination from '../../components/Pagination'
 import type { Candidate, InterviewSession } from '../../types'
 import { markAllRead, notificationsFrom, readIds, type NotificationItem } from '../../utils/hrNotifications'
 
@@ -7,10 +8,13 @@ interface HrUser {
   id: number
 }
 
+const PAGE_SIZE = 20
+
 export default function Notifications() {
   const [items, setItems] = useState<NotificationItem[] | null>(null)
   const [alreadyRead, setAlreadyRead] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   useEffect(() => {
     Promise.all([
@@ -30,6 +34,9 @@ export default function Notifications() {
   if (error) return <p className="text-sm font-medium text-rose-400">{error}</p>
   if (!items) return <p className="text-sm text-slate-500">Bildirimler yükleniyor...</p>
 
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
+  const pageItems = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
   return (
     <div>
       <h2 className="mb-6 text-xl font-semibold text-slate-100">Bildirimler</h2>
@@ -37,7 +44,7 @@ export default function Notifications() {
         <p className="text-sm text-slate-400">Henüz bildirim yok.</p>
       ) : (
         <div className="space-y-2">
-          {items.map((n) => {
+          {pageItems.map((n) => {
             const isUnread = !alreadyRead.has(n.id)
             return (
               <div
@@ -56,6 +63,7 @@ export default function Notifications() {
           })}
         </div>
       )}
+      <Pagination page={page} totalPages={totalPages} onChange={setPage} />
     </div>
   )
 }

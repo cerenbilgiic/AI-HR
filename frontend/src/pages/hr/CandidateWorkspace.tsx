@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { Eye, Upload } from 'lucide-react'
+import { Eye, UserRoundSearch, Video, Upload } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import apiClient from '../../api/client'
@@ -7,7 +7,7 @@ import CandidateDetailPanel from '../../components/CandidateDetailPanel'
 import HrStatusBadge from '../../components/HrStatusBadge'
 import InterviewDetailPanel from '../../components/InterviewDetailPanel'
 import Pagination from '../../components/Pagination'
-import RecommendationBadge from '../../components/RecommendationBadge'
+import RecommendationBadge, { effectiveRecommendation } from '../../components/RecommendationBadge'
 import { pipelineStatus } from '../../utils/hrStatus'
 import type { Candidate, InterviewSession, InvitationEmail, InvitationOut, Job } from '../../types'
 
@@ -18,6 +18,13 @@ function latestSessionFor(candidateId: number, sessions: InterviewSession[]): In
   return sessions
     .filter((s) => s.candidate_id === candidateId)
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+}
+
+// Once HR has recorded a final decision, the candidate has no fresh
+// interview to send a link to (create_session refuses a second attempt) —
+// mirrors the backend guard in invitation_service.send_interview_link.
+function hasFinalDecision(session: InterviewSession | undefined): boolean {
+  return session?.hr_decision != null
 }
 
 // Opens the invitation draft as a real Gmail compose tab instead of sending
@@ -116,7 +123,7 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
       result = result.filter((r) => String(r.candidate.job_id) === positionFilter)
     }
     if (recommendationFilter !== 'all') {
-      result = result.filter((r) => r.session?.recommendation === recommendationFilter)
+      result = result.filter((r) => r.session && effectiveRecommendation(r.session) === recommendationFilter)
     }
     if (minScore.trim()) {
       const min = Number(minScore)
@@ -322,9 +329,16 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
             <input
               type="checkbox"
               className="accent-indigo-500"
-              checked={selected.size > 0 && pageRows.every((r) => selected.has(r.candidate.id))}
+              checked={
+                selected.size > 0 &&
+                pageRows.filter((r) => !hasFinalDecision(r.session)).every((r) => selected.has(r.candidate.id))
+              }
               onChange={(e) =>
-                setSelected(e.target.checked ? new Set(pageRows.map((r) => r.candidate.id)) : new Set())
+                setSelected(
+                  e.target.checked
+                    ? new Set(pageRows.filter((r) => !hasFinalDecision(r.session)).map((r) => r.candidate.id))
+                    : new Set(),
+                )
               }
             />
             Tümünü seç
@@ -350,8 +364,9 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
           >
             <input
               type="checkbox"
-              className="accent-indigo-500"
+              className="accent-indigo-500 disabled:opacity-30"
               checked={selected.has(candidate.id)}
+              disabled={hasFinalDecision(session)}
               onClick={(e) => e.stopPropagation()}
               onChange={() => toggleSelected(candidate.id)}
             />
@@ -365,21 +380,27 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
                 <HrStatusBadge status={pipelineStatus(candidate, session)} />
                 {session?.overall_score != null && <span className="text-xs text-slate-400">{session.overall_score}/100</span>}
               </div>
-              {session?.recommendation && (
+              {session && effectiveRecommendation(session) && (
                 <div className="mt-1">
-                  <RecommendationBadge recommendation={session.recommendation} />
+                  <RecommendationBadge recommendation={effectiveRecommendation(session)!} />
                 </div>
               )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void openInvitePreview([candidate.id])
-                }}
-                disabled={previewLoading}
-                className="mt-1.5 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
-              >
-                {previewLoading ? 'Taslak hazırlanıyor…' : candidate.invited_at ? 'Yeniden davet gönder' : 'Davet gönder'}
-              </button>
+              {hasFinalDecision(session) ? (
+                <p className="mt-1.5 text-[11px] font-medium text-slate-600">
+                  Nihai karar verildi — davet gönderilemez.
+                </p>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void openInvitePreview([candidate.id])
+                  }}
+                  disabled={previewLoading}
+                  className="mt-1.5 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
+                >
+                  {previewLoading ? 'Taslak hazırlanıyor…' : candidate.invited_at ? 'Yeniden davet gönder' : 'Davet gönder'}
+                </button>
+              )}
             </div>
             <Eye className="h-4 w-4 flex-shrink-0 text-slate-600" />
           </div>
@@ -465,8 +486,9 @@ export default function CandidateWorkspace() {
             onSelectSession={setSelectedSessionId}
           />
         ) : (
-          <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-800 text-sm text-slate-500">
-            Detayları görüntülemek için bir aday seçin.
+          <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-800 px-6 text-center text-sm text-slate-500">
+            <UserRoundSearch className="h-8 w-8 text-slate-700" />
+            <p>Detayları görüntülemek için soldan bir aday seçin.</p>
           </div>
         )}
       </div>
@@ -475,8 +497,9 @@ export default function CandidateWorkspace() {
         {candidateId && selectedSessionId ? (
           <InterviewDetailPanel sessionId={String(selectedSessionId)} />
         ) : (
-          <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-800 text-sm text-slate-500">
-            {candidateId ? 'Bu adayın mülakat oturumu yok.' : 'Bir mülakat görüntülemek için önce bir aday seçin.'}
+          <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-800 px-6 text-center text-sm text-slate-500">
+            <Video className="h-8 w-8 text-slate-700" />
+            <p>{candidateId ? 'Bu adayın mülakat oturumu yok.' : 'Bir mülakat görüntülemek için önce bir aday seçin.'}</p>
           </div>
         )}
       </div>

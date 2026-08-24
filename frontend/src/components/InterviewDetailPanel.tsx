@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import apiClient from '../api/client'
 import type { Candidate, DecisionEmail, InterviewReport, InterviewSession, Job } from '../types'
 import HrStatusBadge from './HrStatusBadge'
-import RecommendationBadge, { RECOMMENDATION_LABELS } from './RecommendationBadge'
+import RecommendationBadge, { RECOMMENDATION_LABELS, effectiveRecommendation } from './RecommendationBadge'
 import { COMPETENCY_LABELS } from '../utils/competency'
 
 const VIOLATION_LABELS: Record<string, string> = {
@@ -68,7 +68,6 @@ export default function InterviewDetailPanel({ sessionId }: { sessionId: string 
   const [pdfDownloading, setPdfDownloading] = useState(false)
   const [pdfError, setPdfError] = useState<string | null>(null)
   const [decisionEmail, setDecisionEmail] = useState<DecisionEmail | null>(null)
-  const [emailSent, setEmailSent] = useState(false)
   const [sendingEmail, setSendingEmail] = useState(false)
   const [emailError, setEmailError] = useState<string | null>(null)
 
@@ -128,7 +127,6 @@ export default function InterviewDetailPanel({ sessionId }: { sessionId: string 
   // the actual send uses, so this is never out of sync with what's sent).
   useEffect(() => {
     setDecisionEmail(null)
-    setEmailSent(false)
     setEmailError(null)
     if (!report?.hr_decision) return
     apiClient
@@ -161,7 +159,10 @@ export default function InterviewDetailPanel({ sessionId }: { sessionId: string 
     try {
       const { data } = await apiClient.post<DecisionEmail>(`/reports/session/${sessionId}/send-decision-email`)
       setDecisionEmail(data)
-      setEmailSent(true)
+      // The backend now considers this decision "already emailed" — mirror
+      // that locally rather than refetching, so the button flips to "✓
+      // Gönderildi." immediately (see report.decision_email_sent_for).
+      setReport((prev) => (prev ? { ...prev, decision_email_sent_for: prev.hr_decision } : prev))
     } catch (err) {
       const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
       setEmailError(typeof detail === 'string' ? detail : 'Sonuç e-postası gönderilemedi.')
@@ -251,7 +252,11 @@ export default function InterviewDetailPanel({ sessionId }: { sessionId: string 
               <div>
                 <dt className="text-xs uppercase text-slate-500">Tavsiye</dt>
                 <dd className="mt-0.5">
-                  {session.recommendation ? <RecommendationBadge recommendation={session.recommendation} /> : '—'}
+                  {effectiveRecommendation(session) ? (
+                    <RecommendationBadge recommendation={effectiveRecommendation(session)!} />
+                  ) : (
+                    '—'
+                  )}
                 </dd>
               </div>
             </dl>
@@ -434,8 +439,10 @@ export default function InterviewDetailPanel({ sessionId }: { sessionId: string 
                       <p className="mt-2 whitespace-pre-line rounded border border-slate-700 bg-slate-900 p-2 text-xs text-slate-300">
                         {decisionEmail.body}
                       </p>
-                      {emailSent ? (
-                        <p className="mt-2 text-xs font-medium text-emerald-400">✓ Gönderildi.</p>
+                      {report.decision_email_sent_for === report.hr_decision ? (
+                        <p className="mt-2 text-xs font-medium text-emerald-400">
+                          ✓ Bu karar için gönderildi. Tekrar göndermek için önce kararı değiştirin.
+                        </p>
                       ) : (
                         <button
                           type="button"

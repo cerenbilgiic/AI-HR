@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import apiClient from '../../api/client'
 import DonutChart from '../../components/DonutChart'
 import HrStatusBadge from '../../components/HrStatusBadge'
-import RecommendationBadge from '../../components/RecommendationBadge'
+import RecommendationBadge, { effectiveRecommendation } from '../../components/RecommendationBadge'
 import StatCard from '../../components/StatCard'
 import type { Candidate, InterviewSession, Job } from '../../types'
 
@@ -183,10 +183,10 @@ export default function Dashboard() {
                       <span className="truncate">{job?.title ?? '—'}</span>
                       <span>{new Date(s.created_at).toLocaleDateString()}</span>
                     </div>
-                    {(s.overall_score != null || s.recommendation) && (
+                    {(s.overall_score != null || effectiveRecommendation(s)) && (
                       <div className="mt-1.5 flex items-center gap-2">
                         {s.overall_score != null && <span className="text-xs text-slate-400">{s.overall_score}/100</span>}
-                        {s.recommendation && <RecommendationBadge recommendation={s.recommendation} />}
+                        {effectiveRecommendation(s) && <RecommendationBadge recommendation={effectiveRecommendation(s)!} />}
                       </div>
                     )}
                   </li>

@@ -20,14 +20,18 @@ def _looks_like_gibberish_token(token: str) -> bool:
     return len(set(c.lower() for c in letters)) / len(letters) < 0.35
 
 
-def validate_answer_text(text: str) -> None:
+def validate_answer_text(text: str, *, enforce_word_limit: bool = True) -> None:
     """Raises ValueError with a human-readable reason if `text` shouldn't be
     accepted as an interview answer. Callers should only invoke this for
     non-blank text — an empty answer (e.g. the candidate ran out of time)
     is a separate, legitimate case handled by the caller, not by this check.
+
+    enforce_word_limit=False skips the MAX_ANSWER_WORDS check (but not the
+    gibberish check below) — used for voice answers, which a candidate
+    speaking freely shouldn't have capped the way a typed answer is.
     """
     words = text.split()
-    if len(words) > MAX_ANSWER_WORDS:
+    if enforce_word_limit and len(words) > MAX_ANSWER_WORDS:
         raise ValueError(f"Answers are limited to {MAX_ANSWER_WORDS} words.")
 
     long_tokens = [w for w in words if len(w) >= 4]

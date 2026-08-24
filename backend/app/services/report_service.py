@@ -7,7 +7,7 @@ from app.models.ai_evaluation import AIEvaluation
 from app.models.candidate import Candidate
 from app.models.interview import CandidateAnswer, InterviewSession
 from app.models.job import Job
-from app.schemas.report import CompetencyScores, FinalReportLLMResponse
+from app.schemas.report import CompetencyScores, EvidenceItem, FinalReportLLMResponse
 from app.services.ai import get_ai_provider
 from app.services.ai.base import AIResponseError
 from app.services.interview_service import _format_required_skills
@@ -47,8 +47,36 @@ def _format_answer_evaluations(db: Session, answers: list[CandidateAnswer]) -> s
     return "\n".join(lines)
 
 
+def _dedupe_evidence(evidence: list[EvidenceItem]) -> list[EvidenceItem]:
+    """Small local models tend to cite the exact same quote for more than
+    one competency when the interview doesn't give them enough distinct
+    material — drop later duplicates (by evidence text, not competency) so
+    the report never shows the identical quote twice, regardless of prompt
+    compliance."""
+    seen: set[str] = set()
+    deduped = []
+    for item in evidence:
+        key = item.evidence.strip().lower()
+        if key and key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
 def _answered_count(session: InterviewSession) -> int:
     return sum(1 for a in session.answers if a.transcript and a.transcript.strip())
+
+
+def _compute_overall_score(scores: CompetencyScores) -> int:
+    """The model is never asked to produce a top-level score (see
+    local_llm.py's generate_final_report) — averaging the six competency
+    scores in Python avoids trusting a small local model's arithmetic and
+    keeps this number mechanically consistent with the scores shown
+    alongside it, rather than a possibly-contradictory independent guess.
+    """
+    values = scores.model_dump().values()
+    return round(sum(values) / len(values))
 
 
 def _blank_interview_report() -> FinalReportLLMResponse:
@@ -67,7 +95,6 @@ def _blank_interview_report() -> FinalReportLLMResponse:
         role_fit=0,
     )
     return FinalReportLLMResponse(
-        overall_score=0,
         recommendation="not_recommended",
         competency_scores=zero_scores,
         strengths=[],
@@ -125,11 +152,11 @@ def generate_final_report(db: Session, session_id: int) -> InterviewReport:
     report = existing or InterviewReport(session_id=session_id)
     report.summary = validated.summary
     report.recommendation = validated.recommendation
-    report.overall_score = validated.overall_score
+    report.overall_score = _compute_overall_score(validated.competency_scores)
     report.competency_scores = validated.competency_scores.model_dump()
     report.strengths = validated.strengths
     report.development_areas = validated.development_areas
-    report.evidence = [item.model_dump() for item in validated.evidence]
+    report.evidence = [item.model_dump() for item in _dedupe_evidence(validated.evidence)]
     session.status = "completed"
 
     db.add(report)

@@ -5,9 +5,9 @@ from typing import BinaryIO
 class MediaStorage(ABC):
     """Interface for the object store backing recorded interview media.
 
-    Implemented today with MinIO (see minio_storage.py). Keeping this as an
-    interface lets tests substitute an in-memory fake without touching a
-    real bucket.
+    Implemented today with LocalFileStorage (see local_storage.py). Keeping
+    this as an interface lets tests substitute an in-memory fake without
+    touching the real filesystem.
     """
 
     @abstractmethod

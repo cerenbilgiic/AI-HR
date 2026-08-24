@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -96,6 +97,11 @@ class AnswerSubmit(BaseModel):
     transcript: str | None = None
     audio_path: str | None = None
     is_timeout: bool = False
+    # "voice" exempts the transcript from the word-count limit in
+    # text_quality.validate_answer_text — a candidate speaking freely
+    # shouldn't be capped the way a typed answer is. Defaults to "written"
+    # so any caller that omits it keeps the limit enforced.
+    answer_mode: Literal["voice", "written"] = "written"
     # Seconds into the session's continuous recording where this answer's
     # verbal response starts/ends — used post-interview to slice out audio
     # for STT (see app/services/transcription_service.py). Harmless to send

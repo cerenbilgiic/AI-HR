@@ -122,7 +122,7 @@ def test_transcribe_wrong_candidate_forbidden(
     assert resp.status_code == 403
 
 
-# 7. MinIO connection error
+# 7. Storage connection error
 def test_transcribe_storage_upload_failure(
     client, as_candidate, interview_session, question, fake_storage, mocker
 ):
@@ -215,7 +215,7 @@ def test_get_media_url_no_recording_yet(client, as_hr, interview_session, questi
     assert resp.status_code == 404
 
 
-# Deleting a session should also clean up any MinIO objects its answers
+# Deleting a session should also clean up any storage objects its answers
 # reference, not just the DB rows — otherwise every deleted session leaks
 # an orphaned recording.
 def test_delete_session_cleans_up_media(

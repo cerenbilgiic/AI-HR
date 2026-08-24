@@ -53,3 +53,15 @@ def test_rejects_answer_over_word_limit():
 def test_accepts_answer_at_word_limit():
     text = " ".join(["kelime"] * MAX_ANSWER_WORDS)
     validate_answer_text(text)
+
+
+def test_enforce_word_limit_false_accepts_answer_over_word_limit():
+    # Voice answers pass enforce_word_limit=False — a candidate speaking
+    # freely shouldn't be capped the way a typed answer is.
+    text = " ".join(["kelime"] * (MAX_ANSWER_WORDS + 1))
+    validate_answer_text(text, enforce_word_limit=False)
+
+
+def test_enforce_word_limit_false_still_rejects_gibberish():
+    with pytest.raises(ValueError):
+        validate_answer_text("jkjk jkjk jkjk jkjk", enforce_word_limit=False)

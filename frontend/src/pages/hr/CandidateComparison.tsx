@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import apiClient from '../../api/client'
 import HrStatusBadge from '../../components/HrStatusBadge'
-import RecommendationBadge from '../../components/RecommendationBadge'
+import RecommendationBadge, { effectiveRecommendation } from '../../components/RecommendationBadge'
 import { COMPETENCY_LABELS } from '../../utils/competency'
 import type { Candidate, CompetencyScores, InterviewReport, InterviewSession, Job } from '../../types'
 
@@ -79,14 +79,20 @@ export default function CandidateComparison() {
                 <p className="truncate text-xs text-slate-500">{job?.title ?? '—'}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <HrStatusBadge status={session.status} />
-                  {session.recommendation && <RecommendationBadge recommendation={session.recommendation} />}
+                  {effectiveRecommendation(session) && (
+                    <RecommendationBadge recommendation={effectiveRecommendation(session)!} />
+                  )}
                 </div>
                 <p className="mt-2 text-2xl font-semibold text-slate-100">
                   {session.overall_score != null ? `${session.overall_score}/100` : '—'}
                 </p>
-                {session.hr_decision && (
+                {/* Only shown when HR overrode the AI — the badge above
+                    already reads as HR's call once hr_decision is set, so
+                    this is purely "for context, the AI suggested something
+                    else", not a second, competing verdict. */}
+                {session.hr_decision && session.hr_decision !== session.recommendation && session.recommendation && (
                   <p className="mt-1 text-xs text-slate-500">
-                    İK Kararı: <RecommendationBadge recommendation={session.hr_decision} />
+                    AI Önerisi: <RecommendationBadge recommendation={session.recommendation} />
                   </p>
                 )}
               </div>

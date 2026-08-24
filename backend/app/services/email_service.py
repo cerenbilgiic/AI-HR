@@ -1,4 +1,5 @@
 import smtplib
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -58,10 +59,20 @@ def send_email(to_email: str, subject: str, text_paragraphs: list[str]) -> None:
         server.sendmail(settings.smtp_from_email, [to_email], message.as_string())
 
 
-def build_invitation_email(candidate_name: str, job_title: str, interview_link: str) -> tuple[str, list[str]]:
+def build_invitation_email(
+    candidate_name: str, job_title: str, interview_link: str, deadline: datetime
+) -> tuple[str, list[str]]:
     """Returns (subject, paragraphs) — the invitation email sent when HR
     clicks "Davet gönder" (see invitation_service.send_interview_link).
     The link is a one-time magic link, not a login — no password involved.
+    `deadline` is interview_deadline_days from the moment this email's
+    content (and its magic link, which expires at the exact same instant —
+    see invitation_service._build_invitation_content) is generated, so
+    stating it here never promises access the link doesn't actually have.
+    Formatted date-only (no time-of-day): the cutoff is meant to read as a
+    day, not a precise minute, and two content-builder calls a moment apart
+    (preview then send) must render an identical paragraph — see
+    test_preview_and_send_share_the_same_content_builder.
     The last paragraph is deliberately just the bare URL — see
     _html_from_paragraphs, which turns exactly that shape into a button.
     """
@@ -72,6 +83,8 @@ def build_invitation_email(candidate_name: str, job_title: str, interview_link: 
         "Mülakat sesli veya yazılı olarak cevaplayabileceğiniz birkaç sorudan oluşuyor ve genellikle 10-15 dakika sürüyor.",
         "Başlamadan önce kamera ve mikrofonunuza erişim izni vermeniz istenecek — mülakat kayıt altına alınır. "
         "Aşağıdaki bağlantı yalnızca size özeldir, kimseyle paylaşmayınız.",
+        f"Bu davet {deadline.strftime('%d.%m.%Y')} tarihine kadar geçerlidir; "
+        "mülakatınızı lütfen bu tarihten önce tamamlayınız.",
         # Gmail's compose-URL body param is plain text only (see
         # invitation_service's module docstring — invitations open as a
         # Gmail draft, not a backend-sent HTML email), so an actual clickable

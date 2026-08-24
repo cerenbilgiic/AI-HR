@@ -14,12 +14,16 @@ Run with: python -m scripts.seed_data
 
 from app.core.database import SessionLocal
 from app.core.security import hash_password
+from app.models.ai_evaluation import AIEvaluation
 from app.models.ai_score import AIScore, InterviewReport
+from app.models.audit_log import AuditLog
 from app.models.candidate import Candidate, CandidateCV, CandidateSkill
 from app.models.consent import ConsentRecord
 from app.models.interview import CandidateAnswer, InterviewQuestion, InterviewSession
-from app.models.job import Job, JobSkill
+from app.models.job import Job, JobQuestion, JobSkill
+from app.models.job_transfer_request import JobTransferRequest
 from app.models.user import Role, User
+from app.models.violation import InterviewViolation
 
 SEED_PASSWORD = "Password123!"
 
@@ -306,9 +310,17 @@ def _overall(scores: dict) -> float:
 
 
 def _clear_existing_data(db) -> None:
+    # Children before parents, respecting every FK in app/models/ — a flat
+    # bulk .delete() per table (not ORM cascade) means getting this order
+    # wrong 500s with an IntegrityError. This list drifted out of date as
+    # models were added (AIEvaluation, AuditLog, InterviewViolation,
+    # JobTransferRequest, JobQuestion were all missing, which broke
+    # rerunning this script against any DB that had seen real usage —
+    # audit logs, anti-cheat violations, etc.).
     for model in [
-        CandidateAnswer, InterviewQuestion, AIScore, InterviewReport, InterviewSession,
-        ConsentRecord, CandidateSkill, CandidateCV, Candidate, JobSkill, Job, User, Role,
+        AIEvaluation, CandidateAnswer, InterviewQuestion, InterviewViolation, AIScore, InterviewReport,
+        JobTransferRequest, AuditLog, ConsentRecord, CandidateSkill, CandidateCV,
+        InterviewSession, Candidate, JobSkill, JobQuestion, Job, User, Role,
     ]:
         db.query(model).delete()
     db.commit()

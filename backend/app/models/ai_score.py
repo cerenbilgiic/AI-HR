@@ -43,6 +43,12 @@ class InterviewReport(Base, TimestampMixin):
     # or on session.status alone, so nothing reaches the candidate before a
     # human has actually decided.
     hr_decision: Mapped[str] = mapped_column(Text, nullable=True)
+    # Which hr_decision value the result email has already gone out for —
+    # not a bool, so that changing hr_decision later (recommended -> maybe,
+    # say) naturally re-enables sending again, while re-sending for the
+    # *same*, unchanged decision is blocked (see routers/reports.py's
+    # send_decision_email).
+    decision_email_sent_for: Mapped[str] = mapped_column(Text, nullable=True)
 
     # Populated by the final report generator (see app/services/report_service.py)
     # — nullable because the older, lighter /evaluate flow (finalize_session)

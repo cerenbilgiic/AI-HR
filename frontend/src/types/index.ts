@@ -189,6 +189,7 @@ export interface InterviewReport {
   summary: string | null
   recommendation: string | null
   hr_decision: string | null
+  decision_email_sent_for: string | null
   scores: AIScores | null
   overall_score: number | null
   competency_scores: CompetencyScores | null

@@ -23,6 +23,33 @@ from app.services.text_quality import validate_answer_text
 
 MAX_ADAPTIVE_QUESTIONS = 8
 
+# generate_report (finalize_session's older, unvalidated flow — unlike
+# report_service.generate_final_report, its output isn't schema-constrained)
+# has been observed returning English phrases like "Consider"/"Do Not
+# Recommend" instead of the requested recommended/maybe/not_recommended
+# enum. RecommendationBadge renders whatever string it's given, so garbage
+# here shows up verbatim in the shared HR UI — normalize known variants,
+# drop anything else, rather than writing it straight to the DB.
+_RECOMMENDATION_ALIASES = {
+    "recommended": "recommended",
+    "maybe": "maybe",
+    "not_recommended": "not_recommended",
+    "consider": "maybe",
+    "do not recommend": "not_recommended",
+    "not recommended": "not_recommended",
+    "recommend": "recommended",
+}
+
+
+def _normalize_recommendation(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return _RECOMMENDATION_ALIASES.get(value.strip().lower())
+
+
+def _risk_score_from_violation_count(count: int) -> int:
+    return min(100, count * 20)
+
 
 def _format_required_skills(job: Job | None) -> str:
     if job is None or not job.skills:
@@ -308,7 +335,7 @@ def attach_violation_summary(db: Session, sessions: list[InterviewSession]) -> N
         counts = counts_by_session.get(session.id, {})
         session.violation_counts = counts
         if session.risk_score is not None:
-            session.risk_score = min(100, sum(counts.values()) * 20)
+            session.risk_score = _risk_score_from_violation_count(sum(counts.values()))
 
 
 def log_violation(db: Session, session: InterviewSession, violation_type: str) -> InterviewViolation:
@@ -321,7 +348,7 @@ def log_violation(db: Session, session: InterviewSession, violation_type: str) -
 
 def _compute_risk_score(db: Session, session: InterviewSession) -> int:
     count = db.query(InterviewViolation).filter(InterviewViolation.session_id == session.id).count()
-    return min(100, count * 20)
+    return _risk_score_from_violation_count(count)
 
 
 def update_session_status(
@@ -411,7 +438,7 @@ def submit_answer(db: Session, session_id: int, data: AnswerSubmit) -> Candidate
     # ran out of time, which isn't the same thing as submitting junk on
     # purpose. A blank answer isn't gibberish either, it's just absent.
     if transcript and transcript.strip() and not data.is_timeout:
-        validate_answer_text(transcript.strip())
+        validate_answer_text(transcript.strip(), enforce_word_limit=data.answer_mode != "voice")
 
     # Reuses the existing row instead of inserting a new one: /ai/transcribe
     # may have already created this (session_id, question_id) answer via
@@ -493,7 +520,7 @@ def finalize_session(db: Session, session_id: int) -> InterviewReport:
         report = InterviewReport(session_id=session_id)
         db.add(report)
     report.summary = report_data.get("summary")
-    report.recommendation = report_data.get("recommendation")
+    report.recommendation = _normalize_recommendation(report_data.get("recommendation"))
 
     session.status = "completed"
 

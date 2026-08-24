@@ -1,6 +1,11 @@
+from datetime import datetime, timedelta
+
+from app.core.config import settings
 from app.core.security import decode_access_token
+from app.models.ai_score import InterviewReport
 from app.models.audit_log import AuditLog
 from app.models.candidate import Candidate
+from app.models.interview import InterviewSession
 from app.services import invitation_service
 
 
@@ -8,6 +13,15 @@ def _link_from_body(body: str) -> str:
     # The magic link is the line that's exactly a bare URL, see
     # email_service._html_from_paragraphs / build_invitation_email.
     return next(line for line in body.split("\n") if line.startswith("http"))
+
+
+def _give_final_decision(db_session, candidate: Candidate, job, decision: str = "recommended") -> None:
+    session = InterviewSession(candidate_id=candidate.id, job_id=job.id, status="completed")
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    db_session.add(InterviewReport(session_id=session.id, hr_decision=decision))
+    db_session.commit()
 
 
 def test_send_interview_link_sets_invited_at(client, as_hr, candidate, db_session):
@@ -121,6 +135,62 @@ def test_preview_and_send_share_the_same_content_builder(db_session, candidate):
     non_link_preview = [p for p in preview.paragraphs if not p.startswith("http")]
     non_link_built = [p for p in built.paragraphs if not p.startswith("http")]
     assert non_link_preview == non_link_built
+
+
+def test_invite_email_states_the_deadline_date(client, as_hr, candidate):
+    resp = client.get(f"/api/v1/candidates/{candidate.id}/invite-email")
+
+    assert resp.status_code == 200
+    expected_deadline = datetime.now() + timedelta(days=settings.interview_deadline_days)
+    assert expected_deadline.strftime("%d.%m.%Y") in resp.json()["body"]
+
+
+def test_invite_rejected_once_final_decision_is_set(client, as_hr, candidate, job, db_session):
+    _give_final_decision(db_session, candidate, job)
+
+    resp = client.post(f"/api/v1/candidates/{candidate.id}/invite")
+
+    assert resp.status_code == 409
+
+
+def test_invite_preview_also_rejected_once_final_decision_is_set(client, as_hr, candidate, job, db_session):
+    # Regression: the preview response contains a real, sendable magic link
+    # — HR's "Gmail'de Aç" is a plain <a href> that opens regardless of
+    # whether the later /invite bookkeeping call succeeds, so the link must
+    # never be generated in the first place, not just left unrecorded.
+    _give_final_decision(db_session, candidate, job)
+
+    resp = client.get(f"/api/v1/candidates/{candidate.id}/invite-email")
+
+    assert resp.status_code == 409
+
+
+def test_invite_still_allowed_without_a_final_decision(client, as_hr, candidate):
+    resp = client.post(f"/api/v1/candidates/{candidate.id}/invite")
+
+    assert resp.status_code == 200
+
+
+def test_send_interview_link_service_rejects_decided_candidate(db_session, candidate, job):
+    _give_final_decision(db_session, candidate, job)
+
+    try:
+        invitation_service.send_interview_link(db_session, candidate)
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "nihai karar" in str(exc).lower()
+
+
+def test_invite_bulk_skips_decided_candidates_but_sends_to_the_rest(
+    client, as_hr, candidate, other_candidate, job, db_session
+):
+    _give_final_decision(db_session, candidate, job)
+
+    resp = client.post("/api/v1/candidates/invite-bulk", json=[candidate.id, other_candidate.id])
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [b["candidate_id"] for b in body] == [other_candidate.id]
 
 
 def test_deleting_invited_candidate_does_not_fail_on_fk(client, as_hr, job, db_session):

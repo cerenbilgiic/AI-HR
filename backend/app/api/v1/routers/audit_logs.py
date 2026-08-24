@@ -16,7 +16,11 @@ def list_audit_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
 ) -> list[AuditLogOut]:
-    logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).all()
+    # id as a secondary key: created_at alone ties for rows written in the
+    # same second (a real occurrence — e.g. bulk-invite writes one AuditLog
+    # per candidate in a tight loop), and MySQL doesn't guarantee tie order
+    # matches insertion order, so "newest first" would be unstable without it.
+    logs = db.query(AuditLog).order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).all()
     if not logs:
         return []
 

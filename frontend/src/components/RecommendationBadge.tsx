@@ -1,3 +1,18 @@
+// HR's own final call always wins over the AI's suggestion wherever a
+// screen only has room for one badge (candidate list, dashboard, reports,
+// comparison, an interview's summary header) — a candidate HR marked
+// differently than the AI recommended must read as HR's decision there,
+// not the AI's. The one place that intentionally shows both side by side,
+// separately labeled, is InterviewDetailPanel's full report section (see
+// its "AI Önerisi" line next to the "Nihai Karar (İK)" picker) — that one
+// keeps using report.recommendation/report.hr_decision directly.
+export function effectiveRecommendation(item: {
+  recommendation: string | null
+  hr_decision?: string | null
+}): string | null {
+  return item.hr_decision ?? item.recommendation
+}
+
 export const RECOMMENDATION_LABELS: Record<string, string> = {
   recommended: 'Olumlu',
   maybe: 'Belirsiz',

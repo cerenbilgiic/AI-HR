@@ -108,9 +108,9 @@ def test_submit_answer_reuses_row_created_by_transcribe(db_session, interview_se
     assert count == 1  # no duplicate row
 
 
-def _fake_provider():
+def _fake_provider(recommendation: str = "recommended"):
     provider = MagicMock()
-    provider.generate_report.return_value = {"summary": "Solid candidate.", "recommendation": "hire"}
+    provider.generate_report.return_value = {"summary": "Solid candidate.", "recommendation": recommendation}
     provider.evaluate_answer.return_value = {
         "technical_competency": 4,
         "communication_skills": 4,
@@ -148,9 +148,42 @@ def test_evaluate_session_creates_report_for_awaiting_review_session(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["recommendation"] == "hire"
+    assert body["recommendation"] == "recommended"
     db_session.refresh(interview_session)
     assert interview_session.status == "completed"
+
+
+def test_evaluate_session_normalizes_non_enum_recommendation(client, as_hr, interview_session, db_session, mocker):
+    # Regression: generate_report's output isn't schema-constrained the way
+    # report_service.generate_final_report's is — the local model has been
+    # observed returning English phrases like "Consider"/"Do Not Recommend"
+    # instead of the requested enum, which used to get written to the DB
+    # as-is and rendered verbatim by the shared RecommendationBadge.
+    interview_session.status = "awaiting_review"
+    db_session.commit()
+    mocker.patch(
+        "app.services.interview_service.get_ai_provider",
+        return_value=_fake_provider(recommendation="Do Not Recommend"),
+    )
+
+    response = client.post(f"/api/v1/interviews/{interview_session.id}/evaluate")
+
+    assert response.status_code == 200
+    assert response.json()["recommendation"] == "not_recommended"
+
+
+def test_evaluate_session_drops_unrecognized_recommendation(client, as_hr, interview_session, db_session, mocker):
+    interview_session.status = "awaiting_review"
+    db_session.commit()
+    mocker.patch(
+        "app.services.interview_service.get_ai_provider",
+        return_value=_fake_provider(recommendation="hire"),
+    )
+
+    response = client.post(f"/api/v1/interviews/{interview_session.id}/evaluate")
+
+    assert response.status_code == 200
+    assert response.json()["recommendation"] is None
 
 
 def test_evaluate_session_does_not_duplicate_report_on_second_call(
@@ -200,3 +233,35 @@ def test_submit_answer_allows_blank_transcript(client, as_candidate, interview_s
     )
 
     assert response.status_code == 201
+
+
+def test_submit_answer_rejects_over_word_limit_when_written(client, as_candidate, interview_session, question):
+    from app.services.text_quality import MAX_ANSWER_WORDS
+
+    text = " ".join(["kelime"] * (MAX_ANSWER_WORDS + 1))
+    response = client.post(
+        f"/api/v1/interviews/{interview_session.id}/answers",
+        json={"question_id": question.id, "transcript": text, "answer_mode": "written"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_submit_answer_allows_over_word_limit_when_voice(
+    client, as_candidate, interview_session, question, db_session
+):
+    from app.services.text_quality import MAX_ANSWER_WORDS
+
+    text = " ".join(["kelime"] * (MAX_ANSWER_WORDS + 1))
+    response = client.post(
+        f"/api/v1/interviews/{interview_session.id}/answers",
+        json={"question_id": question.id, "transcript": text, "answer_mode": "voice"},
+    )
+
+    assert response.status_code == 201
+    answer = (
+        db_session.query(CandidateAnswer)
+        .filter(CandidateAnswer.session_id == interview_session.id, CandidateAnswer.question_id == question.id)
+        .first()
+    )
+    assert answer.transcript == text

@@ -1,7 +1,9 @@
 import json
 import re
+from typing import Literal
 
 import ollama
+from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import settings
 from app.services.ai import prompts
@@ -15,6 +17,41 @@ _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 # "Veri tabanı管理工作经验"). Reject rather than strip: a partially-mangled
 # name is worse than just dropping that one skill.
 _CLEAN_SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9ÇçĞğİıÖöŞşÜü .,/()#+&'’-]+$")
+
+# Evaluation criteria are full sentences, so an allowlist like
+# _CLEAN_SKILL_NAME_RE above would be too strict (Turkish sentences use a
+# wide range of punctuation) — instead deny known non-Turkish scripts.
+# Seen in practice: the model occasionally breaks character mid-criterion
+# and produces a Chinese conversational reply instead of an actual
+# criterion (e.g. "...performansını监控中，暂无结果。您希望我如何继续？...").
+# Schema-constrained JSON (see _chat_structured) guarantees the right
+# *shape* but not that a string's *content* is a real criterion.
+_NON_TURKISH_SCRIPT_RE = re.compile(r"[぀-ヿ㐀-鿿가-힣Ѐ-ӿ]")
+
+# Evidence extraction (see EVIDENCE_EXTRACTION_PROMPT) explicitly asks for a
+# single plain sentence, but qwen2.5:7b frequently pastes raw transcript
+# labels ("C1:", "S2 cevabı C4:") into the text anyway — sometimes as a
+# leading prefix, sometimes restating the question too ("S2: <question>
+# C2: <answer>"), sometimes stacking more than one raw Q/A block on
+# separate lines, sometimes wrapping the whole thing in literal quote marks
+# — observed repeatedly, in varying combinations, even with the prompt
+# instruction in place (see backend/scripts/benchmark_final_report_models.py
+# for real examples). No JSON schema can enforce content like this, only
+# shape, so it's cleaned up here instead. Matches a label wherever it
+# appears (not just a leading one), since the model doesn't always put it
+# at the very start.
+_QA_LABEL_RE = re.compile(r"(?:[SC]\d+\s*(?:cevab[ıi]|ve)?\s*)+:\s*", re.IGNORECASE)
+
+
+def _clean_evidence_text(text: str) -> str:
+    # Only the first line/block: a single evidence item should read as one
+    # observation, not a multi-answer transcript dump stacked on separate
+    # lines.
+    first_line = text.strip().split("\n", 1)[0].strip()
+    if len(first_line) >= 2 and first_line[0] == first_line[-1] == '"':
+        first_line = first_line[1:-1].strip()
+    first_line = _QA_LABEL_RE.sub("", first_line).strip('"').strip()
+    return re.sub(r"\s+", " ", first_line)
 
 
 def _strip_json_fence(text: str) -> str:
@@ -38,27 +75,52 @@ def _parse_json(raw: str) -> dict:
         return value
 
 
-_CRITERION_NAME_KEYS = ("criterion_name", "title", "name", "criterion", "kriter", "başlık")
-_CRITERION_DESC_KEYS = ("description", "detail", "aciklama", "açıklama", "detay")
+# --- Schema-constrained response models -----------------------------------
+# Passed as `format=<Model>.model_json_schema()` to ollama.Client.chat (see
+# _chat_structured below) — Ollama enforces this shape server-side during
+# generation, so the model literally cannot return the wrong JSON structure
+# (unlike the free-text prompts above, which only ask nicely and rely on
+# _parse_json/_get_any/_require_keys to cope when the model doesn't comply).
+# This only guarantees *shape*, not content — e.g. it can't stop a skill
+# name from containing stray non-Latin characters, so _CLEAN_SKILL_NAME_RE
+# below still does real work.
 
 
-def _flatten_criterion(item: object) -> str | None:
-    """generate_evaluation_criteria asks for a flat list of strings, but the
-    local model frequently ignores that and returns
-    {"criterion_name"/"title"/...: "...", "description"/...: "..."} objects
-    instead — fold whichever fields it actually used into one readable line
-    rather than silently dropping every criterion (seen in practice: this
-    happens often enough that a strict isinstance(str) filter returned []
-    every time)."""
-    if isinstance(item, str):
-        return item.strip() or None
-    if not isinstance(item, dict):
-        return None
-    name = next((item[k].strip() for k in _CRITERION_NAME_KEYS if isinstance(item.get(k), str) and item[k].strip()), None)
-    desc = next((item[k].strip() for k in _CRITERION_DESC_KEYS if isinstance(item.get(k), str) and item[k].strip()), None)
-    if name and desc:
-        return f"{name}: {desc}"
-    return name or desc
+class _EvidenceItemModel(BaseModel):
+    competency: str
+    evidence: str
+
+
+class _EvidenceExtractionModel(BaseModel):
+    evidence: list[_EvidenceItemModel]
+
+
+class _CompetencyScoresModel(BaseModel):
+    communication: int = Field(ge=0, le=100)
+    technical_competency: int = Field(ge=0, le=100)
+    problem_solving: int = Field(ge=0, le=100)
+    teamwork: int = Field(ge=0, le=100)
+    customer_service: int = Field(ge=0, le=100)
+    role_fit: int = Field(ge=0, le=100)
+
+
+class _ScoringModel(BaseModel):
+    competency_scores: _CompetencyScoresModel
+
+
+class _ReportSynthesisModel(BaseModel):
+    recommendation: Literal["recommended", "maybe", "not_recommended"]
+    strengths: list[str]
+    development_areas: list[str]
+    summary: str
+
+
+class _SkillsModel(BaseModel):
+    skills: list[str]
+
+
+class _CriteriaModel(BaseModel):
+    criteria: list[str]
 
 
 def _require_keys(data: dict, keys: list[str]) -> dict:
@@ -98,6 +160,22 @@ class LocalOllamaProvider(AIProvider):
             keep_alive="30m",
         )
         return response["message"]["content"]
+
+    def _chat_structured[T: BaseModel](self, prompt: str, schema: type[T]) -> T:
+        """Like _chat, but constrains Ollama's generation to `schema`'s JSON
+        shape server-side (see the _EvidenceExtractionModel-etc. comment
+        above) and parses+validates the result in one step."""
+        response = self._client.chat(
+            model=self._model,
+            messages=[{"role": "user", "content": prompt}],
+            format=schema.model_json_schema(),
+            keep_alive="30m",
+        )
+        raw = response["message"]["content"]
+        try:
+            return schema.model_validate_json(raw)
+        except ValidationError as exc:
+            raise AIResponseError(f"Model response did not match the expected schema: {exc}") from exc
 
     def generate_questions(
         self, cv_text: str, job_description: str, required_skills: str, count: int = 5
@@ -182,17 +260,60 @@ class LocalOllamaProvider(AIProvider):
         answer_evaluations: str,
         evaluation_criteria: str = "",
     ) -> dict:
-        prompt = prompts.FINAL_REPORT_PROMPT.format(
+        """Three sequential, schema-constrained calls instead of one giant
+        prompt — see the comment above EVIDENCE_EXTRACTION_PROMPT in
+        prompts.py for why. overall_score is deliberately not part of any
+        of these schemas: report_service.generate_final_report computes it
+        in Python from competency_scores instead of trusting the model's
+        arithmetic.
+
+        candidate_profile/candidate_cv are accepted (kept in the AIProvider
+        interface — report_service always builds and passes them) but
+        deliberately never shown to the model: evaluation is interview-
+        answers-only now, see the module comment above
+        EVIDENCE_EXTRACTION_PROMPT for why.
+        """
+        criteria = (
+            evaluation_criteria
+            or "Bu pozisyon için özel bir değerlendirme kriteri henüz oluşturulmadı; genel yetkinlik çerçevesini kullan."
+        )
+
+        extraction_prompt = prompts.EVIDENCE_EXTRACTION_PROMPT.format(
             job_description=job_description,
-            required_skills=required_skills,
-            candidate_profile=candidate_profile,
-            candidate_cv=candidate_cv,
+            evaluation_criteria=criteria,
             questions_and_answers=questions_and_answers,
             answer_evaluations=answer_evaluations,
-            evaluation_criteria=evaluation_criteria
-            or "Bu pozisyon için özel bir değerlendirme kriteri henüz oluşturulmadı; genel yetkinlik çerçevesini kullan.",
         )
-        return _parse_json(self._chat(prompt))
+        extraction = self._chat_structured(extraction_prompt, _EvidenceExtractionModel)
+        evidence_dicts = [
+            {"competency": item.competency, "evidence": _clean_evidence_text(item.evidence)}
+            for item in extraction.evidence
+        ]
+        evidence_dicts = [e for e in evidence_dicts if e["evidence"]]
+        evidence_json = json.dumps(evidence_dicts, ensure_ascii=False)
+
+        scoring_prompt = prompts.COMPETENCY_SCORING_PROMPT.format(
+            evaluation_criteria=criteria,
+            required_skills=required_skills,
+            evidence=evidence_json,
+        )
+        scoring = self._chat_structured(scoring_prompt, _ScoringModel)
+
+        synthesis_prompt = prompts.REPORT_SYNTHESIS_PROMPT.format(
+            job_description=job_description,
+            evidence=evidence_json,
+            competency_scores=json.dumps(scoring.competency_scores.model_dump(), ensure_ascii=False),
+        )
+        synthesis = self._chat_structured(synthesis_prompt, _ReportSynthesisModel)
+
+        return {
+            "recommendation": synthesis.recommendation,
+            "competency_scores": scoring.competency_scores.model_dump(),
+            "strengths": synthesis.strengths,
+            "development_areas": synthesis.development_areas,
+            "summary": synthesis.summary,
+            "evidence": evidence_dicts,
+        }
 
     def analyze_cv(self, cv_text: str, job_description: str) -> dict:
         prompt = prompts.CV_ANALYSIS_PROMPT.format(job_description=job_description, cv_text=cv_text)
@@ -200,23 +321,19 @@ class LocalOllamaProvider(AIProvider):
 
     def extract_skills(self, cv_text: str, job_description: str) -> list[str]:
         prompt = prompts.CV_SKILL_EXTRACTION_PROMPT.format(job_description=job_description, cv_text=cv_text)
-        data = _parse_json(self._chat(prompt))
-        skills = data.get("skills", [])
-        if not isinstance(skills, list):
-            return []
-        cleaned = [s.strip() for s in skills if isinstance(s, str) and s.strip()]
+        data = self._chat_structured(prompt, _SkillsModel)
+        cleaned = [s.strip() for s in data.skills if s.strip()]
+        # Schema enforcement guarantees `skills` is a list[str] shape, but not
+        # that each string is clean Latin/Turkish text — see _CLEAN_SKILL_NAME_RE.
         return [s for s in cleaned if _CLEAN_SKILL_NAME_RE.match(s)][:12]
 
     def generate_evaluation_criteria(self, job_title: str, job_description: str, required_skills: str) -> list[str]:
         prompt = prompts.EVALUATION_CRITERIA_PROMPT.format(
             job_title=job_title, job_description=job_description, required_skills=required_skills
         )
-        data = _parse_json(self._chat(prompt))
-        raw_criteria = data.get("criteria", [])
-        if not isinstance(raw_criteria, list):
-            return []
-        criteria = [_flatten_criterion(item) for item in raw_criteria]
-        return [c for c in criteria if c][:8]
+        data = self._chat_structured(prompt, _CriteriaModel)
+        cleaned = [c.strip() for c in data.criteria if c.strip()]
+        return [c for c in cleaned if not _NON_TURKISH_SCRIPT_RE.search(c)][:8]
 
     def transcribe(self, audio_path: str) -> str:
         return self._stt.transcribe(audio_path)

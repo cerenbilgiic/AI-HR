@@ -175,7 +175,14 @@ def invite_candidates_bulk(
     try:
         for candidate_id in candidate_ids:
             candidate = _get_candidate_or_404(db, candidate_id)
-            sent = invitation_service.send_interview_link(db, candidate, actor_id=current_user.id)
+            # Skip rather than abort the whole batch — HR selecting a mixed
+            # group (some already decided, some not) should still send to
+            # everyone eligible instead of erroring out on the first
+            # ineligible one (see send_interview_link's ValueError).
+            try:
+                sent = invitation_service.send_interview_link(db, candidate, actor_id=current_user.id)
+            except ValueError:
+                continue
             results.append(InvitationOut(candidate_id=sent.candidate_id, sent_to=sent.sent_to))
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
@@ -204,7 +211,10 @@ def preview_invite_email(
     audit log, doesn't send anything (see pages/hr/CandidateWorkspace.tsx's
     preview-then-confirm flow)."""
     candidate = _get_candidate_or_404(db, candidate_id)
-    content = invitation_service.preview_interview_link_email(db, candidate)
+    try:
+        content = invitation_service.preview_interview_link_email(db, candidate)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return InvitationEmailOut(to=content.to, subject=content.subject, body="\n\n".join(content.paragraphs))
 
 
@@ -217,6 +227,8 @@ def invite_candidate(
     candidate = _get_candidate_or_404(db, candidate_id)
     try:
         sent = invitation_service.send_interview_link(db, candidate, actor_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return InvitationOut(candidate_id=sent.candidate_id, sent_to=sent.sent_to)

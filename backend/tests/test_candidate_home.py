@@ -6,8 +6,25 @@ from app.services.candidate_service import compute_interview_deadline, reset_int
 from tests.conftest import clear_candidate_sessions
 
 
-def test_compute_interview_deadline(candidate):
+def test_compute_interview_deadline(db_session, candidate):
+    # The shared `candidate` fixture is real dev-DB data that may already
+    # have been invited by earlier manual testing — pin invited_at to None
+    # so this test is about the created_at fallback specifically, not
+    # whatever the fixture happens to carry right now.
+    candidate.invited_at = None
+    db_session.commit()
     expected = candidate.created_at + timedelta(days=settings.interview_deadline_days)
+    assert compute_interview_deadline(candidate) == expected
+
+
+def test_compute_interview_deadline_uses_invited_at_once_sent(db_session, candidate):
+    # The deadline must track when the invite was actually emailed, not
+    # account creation — this is also what the magic link's own JWT expiry
+    # matches (see invitation_service._build_invitation_content).
+    candidate.created_at = datetime.now() - timedelta(days=30)
+    candidate.invited_at = datetime.now()
+    db_session.commit()
+    expected = candidate.invited_at + timedelta(days=settings.interview_deadline_days)
     assert compute_interview_deadline(candidate) == expected
 
 

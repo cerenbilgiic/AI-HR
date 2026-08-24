@@ -92,3 +92,34 @@ def test_send_decision_email_requires_a_decision_first(client, as_hr, interview_
     resp = client.post(f"/api/v1/reports/session/{interview_session.id}/send-decision-email")
 
     assert resp.status_code == 409
+
+
+def test_send_decision_email_blocks_resend_for_unchanged_decision(
+    client, as_hr, interview_session, db_session, mocker
+):
+    mocker.patch("app.api.v1.routers.reports.send_email")
+    _report_with_decision(db_session, interview_session, "recommended")
+
+    first = client.post(f"/api/v1/reports/session/{interview_session.id}/send-decision-email")
+    second = client.post(f"/api/v1/reports/session/{interview_session.id}/send-decision-email")
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+
+
+def test_send_decision_email_allowed_again_after_decision_changes(
+    client, as_hr, interview_session, db_session, mocker
+):
+    mock_send = mocker.patch("app.api.v1.routers.reports.send_email")
+    report = _report_with_decision(db_session, interview_session, "recommended")
+
+    first = client.post(f"/api/v1/reports/session/{interview_session.id}/send-decision-email")
+    assert first.status_code == 200
+
+    report.hr_decision = "not_recommended"
+    db_session.commit()
+
+    second = client.post(f"/api/v1/reports/session/{interview_session.id}/send-decision-email")
+
+    assert second.status_code == 200
+    assert mock_send.call_count == 2

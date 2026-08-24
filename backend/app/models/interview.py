@@ -56,10 +56,11 @@ class CandidateAnswer(Base, TimestampMixin):
     session_id: Mapped[int] = mapped_column(ForeignKey("interview_sessions.id"))
     question_id: Mapped[int] = mapped_column(ForeignKey("interview_questions.id"))
     transcript: Mapped[str] = mapped_column(Text, nullable=True)
-    # Holds a MinIO object key (e.g. "interviews/42/<uuid>.webm"), not a
-    # filesystem path, despite the name — kept as-is to avoid an unnecessary
-    # rename/migration; see media_filename/content_type/size below for the
-    # rest of the object's metadata.
+    # Holds a storage object key (e.g. "interviews/42/<uuid>.webm"), which
+    # LocalFileStorage also treats as a relative path under local_media_dir
+    # — kept as-is to avoid an unnecessary rename/migration; see
+    # media_filename/content_type/size below for the rest of the object's
+    # metadata.
     audio_path: Mapped[str] = mapped_column(String(500), nullable=True)
     media_filename: Mapped[str] = mapped_column(String(255), nullable=True)
     media_content_type: Mapped[str] = mapped_column(String(100), nullable=True)

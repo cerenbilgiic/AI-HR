@@ -2,7 +2,7 @@
 
 Three independent windows (see Settings.media_retention_days /
 transcript_retention_days / report_retention_days, env-configurable):
-  - recorded audio/video (MinIO object + its DB reference)      -> shortest
+  - recorded audio/video (local storage object + its DB reference) -> shortest
   - answer transcripts (the text of what the candidate said)    -> medium
   - the final AI report (interview_reports + ai_scores)         -> longest
 

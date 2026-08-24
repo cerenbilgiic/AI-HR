@@ -33,10 +33,15 @@ def get_candidate(db: Session, candidate_id: int) -> Candidate | None:
 
 
 def compute_interview_deadline(candidate: Candidate) -> datetime:
-    """N days from account creation (settings.interview_deadline_days) —
-    or from interview_reset_at instead, once HR has granted the candidate
-    a fresh window via reset_interview_deadline below."""
-    base = candidate.interview_reset_at or candidate.created_at
+    """N days from when the invitation email was actually sent
+    (candidate.invited_at, settings.interview_deadline_days) — this is also
+    exactly when the magic link's own JWT expires (see
+    invitation_service._build_invitation_content), so the two never
+    disagree. interview_reset_at overrides both once HR has granted the
+    candidate a fresh window via reset_interview_deadline below. Falls back
+    to created_at only for a candidate who hasn't been invited yet — there's
+    no real consequence either way since they have no link to use."""
+    base = candidate.interview_reset_at or candidate.invited_at or candidate.created_at
     return base + timedelta(days=settings.interview_deadline_days)
 
 

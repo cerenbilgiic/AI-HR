@@ -38,9 +38,14 @@ function looksLikeGibberishToken(token: string): boolean {
   return distinct / letters.length < 0.35
 }
 
-function validateAnswerText(text: string): string | null {
+function validateAnswerText(text: string, mode: AnswerMode): string | null {
   const words = text.trim().split(/\s+/).filter(Boolean)
-  if (words.length > MAX_ANSWER_WORDS) return `Cevaplar en fazla ${MAX_ANSWER_WORDS} kelime olabilir.`
+  // The word-count cap only applies to typed answers — a candidate
+  // answering verbally shouldn't be capped the way a typed answer is (see
+  // the matching enforce_word_limit flag on the backend's submit_answer).
+  if (mode === 'written' && words.length > MAX_ANSWER_WORDS) {
+    return `Cevaplar en fazla ${MAX_ANSWER_WORDS} kelime olabilir.`
+  }
   const longTokens = words.filter((w) => w.length >= 4)
   if (longTokens.length > 0) {
     const gibberishCount = longTokens.filter(looksLikeGibberishToken).length
@@ -417,7 +422,7 @@ export default function Interview() {
     // verbally (the whole interview is recorded regardless). Validation
     // only applies when they actually typed something.
     if (!isTimeout && textToSubmit.trim()) {
-      const validationError = validateAnswerText(textToSubmit)
+      const validationError = validateAnswerText(textToSubmit, answerMode)
       if (validationError) {
         setError(validationError)
         return
@@ -438,6 +443,7 @@ export default function Interview() {
         question_id: question.id,
         transcript: textToSubmit,
         is_timeout: isTimeout,
+        answer_mode: answerMode,
         recording_start_offset_seconds: recordingStartOffsetSeconds,
         recording_end_offset_seconds: recordingEndOffsetSeconds,
       })
@@ -752,7 +758,7 @@ export default function Interview() {
       {error && <p className="mt-2 text-sm font-medium text-rose-400">{error}</p>}
       <button
         onClick={() => void submitAnswer()}
-        disabled={submitting || wordCount > MAX_ANSWER_WORDS || !canSpeakNow}
+        disabled={submitting || (answerMode === 'written' && wordCount > MAX_ANSWER_WORDS) || !canSpeakNow}
         className="mt-4 w-full rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500 disabled:opacity-40"
       >
         {submitting

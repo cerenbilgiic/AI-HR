@@ -22,9 +22,12 @@ class EvidenceItem(BaseModel):
 class FinalReportLLMResponse(BaseModel):
     """Validates the raw dict returned by AIProvider.generate_final_report
     before anything is written to MySQL — see app/services/report_service.py.
+
+    No overall_score field: the model is never asked for it anymore (see
+    local_llm.py's generate_final_report) — report_service computes it in
+    Python from competency_scores instead of trusting LLM arithmetic.
     """
 
-    overall_score: int = Field(ge=0, le=100)
     recommendation: RecommendationEnum
     competency_scores: CompetencyScores
     strengths: list[str]
@@ -61,6 +64,11 @@ class InterviewReportOut(BaseModel):
     summary: str | None
     recommendation: str | None
     hr_decision: str | None = None
+    # Which hr_decision value the result email was last sent for — lets the
+    # frontend tell "already sent, decision unchanged since" apart from
+    # "decision changed, a fresh email is due" without guessing from local
+    # state alone (see routers/reports.py's send_decision_email).
+    decision_email_sent_for: str | None = None
     scores: AIScoreOut | None = None
     # Populated only by the final report generator (report_service.py) —
     # None for reports created by the older, lighter /evaluate flow.

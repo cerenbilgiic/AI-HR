@@ -199,28 +199,39 @@ Yanıtı "strengths" (kısa madde listesi), "weaknesses" (kısa madde listesi) v
 TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
 """
 
-FINAL_REPORT_PROMPT = """Sen perakende sektöründeki işe alım süreçlerine özelleşmiş bir yapay zekâ mülakat değerlendirme asistanısın.
+# Final-report generation used to be one monolithic prompt asking for
+# evidence extraction + numeric scoring + narrative synthesis + overall_score
+# arithmetic all at once (see git history for the old FINAL_REPORT_PROMPT).
+# Split into three focused, sequential prompts — each stage gets a smaller,
+# single-purpose task and only the inputs it actually needs, which is both
+# easier for a 7-8B local model to do reliably and structurally enforces
+# "evaluate from interview evidence only": candidate_cv/candidate_profile
+# are not shown to any of the three stages at all (see
+# LocalOllamaProvider.generate_final_report) — a "yalnızca bağlam amaçlı,
+# kanıt olarak kullanma" instruction was tried first, but the model still
+# occasionally copied CV text into "evidence" verbatim (seen in practice via
+# scripts/benchmark_final_report_models.py), so the reliable fix is to never
+# give it that text at all rather than ask it not to use it. overall_score
+# is no longer asked for either — see report_service._compute_overall_score,
+# which derives it from competency_scores in Python instead of trusting the
+# model's arithmetic.
+#
+# All three responses are schema-constrained via LocalOllamaProvider's
+# `format=<pydantic model's JSON schema>` (see local_llm.py's
+# _chat_structured) — Ollama enforces the JSON *shape* server-side, so
+# these prompts describe the task, not the output mechanics.
 
-Görevin, tamamlanmış bir iş mülakatını, adayın cevaplarını ve önceki yapay zekâ değerlendirmelerini analiz ederek yapılandırılmış bir mülakat değerlendirme raporu oluşturmaktır.
+EVIDENCE_EXTRACTION_PROMPT = """Sen perakende sektöründeki işe alım süreçlerine özelleşmiş bir yapay zekâ mülakat analistisin.
 
-Adayı yalnızca mülakat sırasında toplanan kanıtlara ve pozisyonla ilgili bilgilere dayanarak değerlendir.
+Görevin, tamamlanmış bir mülakatın soru-cevaplarından, aşağıdaki 6 yetkinlik için SOMUT KANIT çıkarmaktır. Bu aşamada puanlama veya yorum yapma — sadece adayın gerçekten söylediklerinden alıntı/gözlem çıkar.
 
-Verilmeyen hiçbir bilgiyi uydurma veya varsayma.
+Yetkinlikler: communication, technical_competency (pozisyona özgü yetkinlikler), problem_solving, teamwork, customer_service, role_fit (önceki deneyimin pozisyonla ilgisi).
 
 İŞ İLANI:
 {job_description}
 
-GEREKLİ YETKİNLİKLER:
-{required_skills}
-
-BU POZİSYONA ÖZGÜ DEĞERLENDİRME KRİTERLERİ (öncelikli olarak bunlara göre değerlendir):
+BU POZİSYONA ÖZGÜ DEĞERLENDİRME KRİTERLERİ:
 {evaluation_criteria}
-
-ADAY PROFİLİ:
-{candidate_profile}
-
-ADAY CV'Sİ:
-{candidate_cv}
 
 MÜLAKAT SORULARI VE CEVAPLARI:
 {questions_and_answers}
@@ -228,74 +239,61 @@ MÜLAKAT SORULARI VE CEVAPLARI:
 ÖNCEKİ YAPAY ZEKÂ DEĞERLENDİRMELERİ:
 {answer_evaluations}
 
-Aşağıdaki yetkinlikleri değerlendir:
+Kurallar:
 
-1. İletişim becerileri
-2. Pozisyona özgü yetkinlikler
-3. Problem çözme
-4. Takım çalışması
-5. Müşteri odaklılık
-6. Önceki deneyimin pozisyonla ilgisi
-7. Genel mülakat performansı
+- Adayı YALNIZCA yukarıdaki mülakat sorularına verdiği cevaplara göre değerlendir. CV'si veya özgeçmişi sana verilmedi — sadece mülakatta söylediklerine dayan, adayın deneyimi hakkında hiçbir şey varsayma veya uydurma.
+- Bir yetkinlik için mülakatta gerçek bir kanıt yoksa (ilgili soru cevapsız kaldıysa veya cevap tamamen alakasızsa), o yetkinlik için hiç madde ekleme — var olmayan bir kanıdı uydurma veya başka bir yetkinliğin kanıtını tekrar kullanma.
+- Her yetkinliğin kanıt metni birbirinden FARKLI olmalı — aynı alıntıyı birden fazla yetkinliğe kopyalama; bir cevap birden fazla yetkinlikle ilgiliyse, her biri için o yetkinliğe özgü farklı bir cümleyle/açıdan yaz.
+- Kanıt metni TEK bir düz cümle olmalı — kendi kelimelerinle yaz. "S1:", "C2:" gibi soru/cevap etiketlerini veya birden fazla cevabı olduğu gibi art arda ekleme; adayın söylediğini kısaca özetleyip gerekirse tek bir kısa alıntıyı tırnak içinde ver.
+- TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
+"""
 
-Değerlendirme kuralları:
+COMPETENCY_SCORING_PROMPT = """Sen perakende sektöründeki işe alım süreçlerine özelleşmiş bir yapay zekâ mülakat değerlendiricisisin.
 
-- Yukarıdaki "BU POZİSYONA ÖZGÜ DEĞERLENDİRME KRİTERLERİ" bölümünü, aşağıdaki
-  6 yetkinliği puanlarken ve "strengths"/"development_areas"/"evidence"
-  alanlarını yazarken temel referans olarak kullan — genel geçer
-  değerlendirme yerine bu pozisyona özgü, somut gözlemlere dayalı bir
-  değerlendirme yap.
-- Her puanı 0 ile 100 arasında ver.
-- Puanları mülakat cevaplarındaki kanıtlarla tutarlı tut.
-- Aday hakkında bilgi uydurma.
-- Kanıt olmadan yetkinlikler hakkında varsayımda bulunma.
-- Bir yetkinlik için hiç kanıt yoksa (ilgili sorular cevapsız bırakıldıysa veya cevap konuyla tamamen alakasızsa), o yetkinliğe orta düzey bir puan verme — kanıt yokluğu düşük puan (0-20 aralığı) anlamına gelir, asla ortalamaya yuvarlanan bir tahmin değil.
-- Adayın cevapladığı soru sayısı azsa, genel puanı buna göre düşük tut — cevapsız bırakılan sorular sanki ortalama bir cevap verilmiş gibi telafi edilmemelidir.
-- Korunan veya kişisel özellikleri değerlendirme kriteri olarak kullanma.
-- Yaş, cinsiyet, etnik köken, din, sağlık durumu veya benzeri kişisel özellikleri değerlendirme.
-- Yalnızca işle ilgili yetkinlikleri değerlendir.
-- Güçlü yönleri adayın cevaplarındaki somut kanıtlara dayandır.
-- Gelişim alanlarını adayın cevaplarındaki somut kanıtlara dayandır.
+Görevin, aşağıda verilen kanıtlara dayanarak 6 yetkinliği 0-100 arasında puanlamaktır. Kanıtları tekrar yorumlama veya genişletme — sadece puanla.
+
+BU POZİSYONA ÖZGÜ DEĞERLENDİRME KRİTERLERİ (önceliklendir):
+{evaluation_criteria}
+
+GEREKLİ YETKİNLİKLER:
+{required_skills}
+
+ÇIKARILMIŞ KANITLAR:
+{evidence}
+
+Kurallar:
+
+- Her puanı 0 ile 100 arasında tam sayı olarak ver.
+- Puanı yalnızca yukarıdaki kanıtlara dayandır — kanıtta belirtilmeyen hiçbir şeyi varsayma.
+- Bir yetkinlik için kanıt listesinde hiç madde yoksa, o yetkinliğe orta düzey bir puan verme — kanıt yokluğu düşük puan (0-20 aralığı) anlamına gelir, asla ortalamaya yuvarlanan bir tahmin değil.
+- Korunan veya kişisel özellikleri (yaş, cinsiyet, etnik köken, din, sağlık durumu vb.) değerlendirme kriteri olarak kullanma.
+"""
+
+REPORT_SYNTHESIS_PROMPT = """Sen perakende sektöründeki işe alım süreçlerine özelleşmiş bir yapay zekâ İK raportörüsün.
+
+Görevin, aşağıdaki kanıtlara ve yetkinlik puanlarına dayanarak nihai bir işe alım önerisi, güçlü yönler, gelişim alanları ve kısa bir özet yazmaktır. Yeni bir değerlendirme yapma veya puanları değiştirme — sadece verilenleri yorumla ve sentezle.
+
+İŞ İLANI:
+{job_description}
+
+ÇIKARILMIŞ KANITLAR:
+{evidence}
+
+YETKİNLİK PUANLARI:
+{competency_scores}
+
+Kurallar:
+
+- "recommendation" alanı yalnızca şunlardan birini içermelidir: "recommended", "maybe", "not_recommended" (İngilizce bırak).
+- Öneriyi yetkinlik puanlarının GENEL EĞİLİMİNE göre ver, tek bir puana bakma:
+  - Puanların çoğu (en az 4/6) 65 veya üzerindeyse → "recommended".
+  - Puanların çoğu 35'in altındaysa → "not_recommended".
+  - Bunların ikisine de girmeyen karışık/orta durumlar → "maybe".
+  - Bu eşikleri hafifletme veya yuvarlama — örneğin ortalaması 20 civarı olan bir aday asla "recommended" veya "maybe" olamaz, "not_recommended" olmalıdır.
+- Tek bir cevaba veya tek bir yetkinliğe dayanarak nihai öneri sunma — puanların tamamını dikkate al.
+- "strengths" ve "development_areas" listelerindeki HER MADDE, TEK bir gözleme odaklanan kısa bir cümle (en fazla 1-2 cümle) olmalı — birden fazla farklı gözlemi tek bir uzun maddede birleştirme. Kanıtlarda kaç ayrı belirgin gözlem varsa o kadar ayrı madde oluştur (genelde 2-4 madde arası; kanıt çok azsa daha az madde de olabilir, madde uydurma).
+- Güçlü yönleri ve gelişim alanlarını yalnızca verilen kanıtlara dayandır, yeni bilgi uydurma.
+- Adayın cevapladığı soru sayısı azsa (kanıt listesi kısaysa), öneriyi buna göre temkinli tut.
 - Profesyonel ve tarafsız bir üslup kullan.
-- Tek bir cevaba dayanarak nihai bir öneri sunma.
-- Mülakatın tamamını dikkate al.
-- Nihai puanları önceki yapay zekâ değerlendirmeleriyle makul ölçüde tutarlı tut.
-- "summary", "strengths", "development_areas" ve "evidence" alanlarındaki tüm metinleri TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
-- Aşağıdaki JSON yapısındaki alan adlarını (anahtarları) ve "recommendation" değerini ("recommended", "maybe", "not_recommended") olduğu gibi İngilizce bırak — yalnızca metin içerikleri Türkçe olmalı.
-
-Yalnızca geçerli JSON döndür.
-Markdown döndürme.
-JSON dışında hiçbir açıklama ekleme.
-
-Yanıtını tam olarak şu JSON yapısıyla ver:
-
-{{
-  "overall_score": 0,
-  "recommendation": "recommended",
-  "competency_scores": {{
-    "communication": 0,
-    "technical_competency": 0,
-    "problem_solving": 0,
-    "teamwork": 0,
-    "customer_service": 0,
-    "role_fit": 0
-  }},
-  "strengths": [
-    "(Türkçe metin)"
-  ],
-  "development_areas": [
-    "(Türkçe metin)"
-  ],
-  "summary": "(Türkçe metin)",
-  "evidence": [
-    {{
-      "competency": "...",
-      "evidence": "(Türkçe metin)"
-    }}
-  ]
-}}
-
-"recommendation" alanı yalnızca şunlardan birini içermelidir: "recommended", "maybe", "not_recommended".
-Tüm puanlar 0 ile 100 arasında tam sayı olmalıdır.
-ÖNEMLİ: "strengths", "development_areas", "summary" ve "evidence" alanlarındaki tüm cümleleri TÜRKÇE yaz. İngilizce, Çince veya başka bir dil KULLANMA — bu kural her şeyden önceliklidir.
+- "recommendation" değeri dışındaki tüm metinleri (strengths, development_areas, summary) TÜRKÇE yaz. İngilizce veya başka bir dil kullanma.
 """

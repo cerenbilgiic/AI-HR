@@ -53,26 +53,7 @@ export default function Consent() {
   const [testingDevices, setTestingDevices] = useState(false)
   const [deviceError, setDeviceError] = useState<string | null>(null)
 
-  const [cvUploaded, setCvUploaded] = useState(false)
-  const [uploadingCv, setUploadingCv] = useState(false)
-  const [cvError, setCvError] = useState<string | null>(null)
-
   const { speak, speaking, muted, setMuted } = useAIVoice()
-
-  async function handleCvSelected(file: File) {
-    setUploadingCv(true)
-    setCvError(null)
-    try {
-      const formData = new FormData()
-      formData.append('cv', file)
-      await candidateApiClient.post('/candidates/me/cv', formData)
-      setCvUploaded(true)
-    } catch {
-      setCvError('Özgeçmiş yüklenemedi. Lütfen tekrar deneyin.')
-    } finally {
-      setUploadingCv(false)
-    }
-  }
 
   async function testDevices() {
     setTestingDevices(true)
@@ -221,29 +202,6 @@ export default function Consent() {
           {testingDevices ? 'Kontrol ediliyor…' : 'Kamera ve Mikrofonu Test Et'}
         </button>
         {deviceError && <p className="mt-2 text-sm font-medium text-rose-400">{deviceError}</p>}
-      </div>
-
-      <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4 shadow-sm">
-        <h3 className="mb-2 font-semibold text-slate-100">Özgeçmiş (CV)</h3>
-        <p className="mb-3 text-sm text-slate-300">
-          İsterseniz özgeçmişinizi yükleyebilirsiniz — yapay zekâ mülakat asistanı sorularınızı buna göre
-          kişiselleştirebilir. Bu adım isteğe bağlıdır.
-        </p>
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
-          <input
-            type="file"
-            accept=".pdf,.doc,.docx"
-            className="hidden"
-            disabled={uploadingCv}
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) void handleCvSelected(file)
-              e.target.value = ''
-            }}
-          />
-          {uploadingCv ? 'Yükleniyor…' : cvUploaded ? '✓ Yüklendi — değiştir' : 'Özgeçmiş yükle'}
-        </label>
-        {cvError && <p className="mt-2 text-sm font-medium text-rose-400">{cvError}</p>}
       </div>
 
       <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 shadow-sm">
