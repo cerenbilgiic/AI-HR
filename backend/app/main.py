@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="AI-HR Interview Pre-Screening API", lifespan=lifespan)
+app = FastAPI(title="KOTON-HR Interview Pre-Screening API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

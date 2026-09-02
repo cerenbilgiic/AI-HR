@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     local_media_dir: str = r"C:\HR-Recordings"
 
     # KVKK-driven data retention windows (see app/services/data_retention.py).
-    media_retention_days: int = 7
+    media_retention_days: int = 30
     transcript_retention_days: int = 30
     report_retention_days: int = 90
 
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from_email: str = ""
-    smtp_from_name: str = "AI-HR İşe Alım"
+    smtp_from_name: str = "KOTON-HR İşe Alım"
 
     @property
     def cors_origin_list(self) -> list[str]:

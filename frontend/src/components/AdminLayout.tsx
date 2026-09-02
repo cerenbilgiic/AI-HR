@@ -48,7 +48,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    document.title = 'AI-HR · Yönetici'
+    document.title = 'KOTON-HR · Yönetici'
   }, [])
 
   useEffect(() => {
@@ -111,7 +111,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
             AI
           </span>
-          <h1 className="text-lg font-semibold text-slate-100">AI-HR · Yönetici</h1>
+          <h1 className="text-lg font-semibold text-slate-100">KOTON-HR · Yönetici</h1>
         </div>
       </header>
 

@@ -1,4 +1,4 @@
-# AI-HR — AI-Powered Interview Pre-Screening Platform (PoC)
+# KOTON-HR — AI-Powered Interview Pre-Screening Platform (PoC)
 
 Proof-of-concept AI interview pre-screening platform for retail hiring. Candidates complete an AI-driven interview (CV-aware question generation, speech-to-text, answer evaluation) before meeting a human recruiter; HR reviews structured reports in a dashboard.
 

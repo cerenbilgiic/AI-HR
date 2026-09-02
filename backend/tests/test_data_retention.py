@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from app.core.config import settings
 from app.models.ai_score import AIScore, InterviewReport
 from app.models.interview import CandidateAnswer
 from app.services import data_retention
@@ -73,8 +74,16 @@ def test_delete_expired_reports_keeps_recent(db_session, interview_session):
 
 
 def test_run_retention_sweep_applies_each_window_independently(
-    db_session, fake_storage, interview_session, question
+    db_session, fake_storage, interview_session, question, mocker
 ):
+    # Pin the windows to fixed, distinguishable values for this test rather
+    # than relying on whatever settings.media/transcript/report_retention_days
+    # happen to be configured to in production — this test is about the
+    # *independence* of the three windows, not any particular day count.
+    mocker.patch.object(settings, "media_retention_days", 7)
+    mocker.patch.object(settings, "transcript_retention_days", 30)
+    mocker.patch.object(settings, "report_retention_days", 90)
+
     # 10 days old: past the 7-day media window, still under the 30-day
     # transcript window -> media purged, transcript survives.
     answer = CandidateAnswer(

@@ -5,17 +5,17 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Search,
   Settings as SettingsIcon,
   User,
   UserCog,
   Users,
   Video,
 } from 'lucide-react'
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useUnreadNotificationCount } from '../hooks/useUnreadNotificationCount'
+import QuickSearch from './QuickSearch'
 import { ROLE_LABELS } from '../utils/roles'
 
 interface HrUser {
@@ -73,7 +73,6 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const [hrUser, setHrUser] = useState<HrUser | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
   const unreadCount = useUnreadNotificationCount(showHrSidebar)
 
   useEffect(() => {
@@ -96,22 +95,17 @@ export default function Layout({ children }: { children: ReactNode }) {
   // so there's no /admin case to handle here.
   useEffect(() => {
     if (location.pathname.startsWith('/hr')) {
-      document.title = 'AI-HR · İK Paneli'
+      document.title = 'KOTON-HR · İK Paneli'
     } else if (location.pathname.startsWith('/interview')) {
-      document.title = 'AI-HR · Aday Paneli'
+      document.title = 'KOTON-HR · Aday Paneli'
     } else {
-      document.title = 'AI-HR'
+      document.title = 'KOTON-HR'
     }
   }, [location.pathname])
 
   function handleHrLogout() {
     localStorage.removeItem('access_token')
     navigate('/hr/login')
-  }
-
-  function handleSearchSubmit(e: FormEvent) {
-    e.preventDefault()
-    navigate(`/hr/candidates${searchQuery.trim() ? `?q=${encodeURIComponent(searchQuery.trim())}` : ''}`)
   }
 
   function hrNav(onNavigate?: () => void) {
@@ -167,20 +161,11 @@ export default function Layout({ children }: { children: ReactNode }) {
           <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
             AI
           </span>
-          <h1 className="text-lg font-semibold text-slate-100">AI-HR</h1>
+          <h1 className="text-lg font-semibold text-slate-100">KOTON-HR</h1>
 
           {showHrSidebar && (
             <div className="ml-auto flex items-center gap-3">
-              <form onSubmit={handleSearchSubmit} className="relative hidden sm:block">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Aday ara..."
-                  className="w-52 rounded-lg border border-slate-700 bg-slate-800 py-1.5 pl-8 pr-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
-              </form>
+              <QuickSearch />
               <button
                 type="button"
                 onClick={() => navigate('/hr/notifications')}
