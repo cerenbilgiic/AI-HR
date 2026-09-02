@@ -34,3 +34,7 @@ Thumbs.db
 
 # Uploaded media
 backend/uploads/
+
+# Avatar lip-sync experiment (vendored repo + venv + model checkpoints —
+# never meant for version control, see backend/scripts/avatar_poc/)
+backend/scripts/avatar_poc/
