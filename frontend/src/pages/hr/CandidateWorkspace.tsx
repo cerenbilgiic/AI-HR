@@ -20,11 +20,13 @@ function latestSessionFor(candidateId: number, sessions: InterviewSession[]): In
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
 }
 
-// Once HR has recorded a final decision, the candidate has no fresh
-// interview to send a link to (create_session refuses a second attempt) —
-// mirrors the backend guard in invitation_service.send_interview_link.
-function hasFinalDecision(session: InterviewSession | undefined): boolean {
-  return session?.hr_decision != null
+// Once a candidate has any interview session — in any status, not just a
+// final HR decision — they have no fresh interview to send a link to
+// (create_session refuses a second attempt regardless of that session's
+// status) — mirrors the backend guard in
+// invitation_service._has_started_interview.
+function hasStartedInterview(session: InterviewSession | undefined): boolean {
+  return session != null
 }
 
 // Opens the invitation draft as a real Gmail compose tab instead of sending
@@ -131,8 +133,12 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
     }
     if (sortKey) {
       result = [...result].sort((a, b) => {
-        const av = sortKey === 'score' ? (a.session?.overall_score ?? -1) : new Date(a.session?.created_at ?? 0).getTime()
-        const bv = sortKey === 'score' ? (b.session?.overall_score ?? -1) : new Date(b.session?.created_at ?? 0).getTime()
+        // updated_at, not created_at — created_at is fixed at interview
+        // start, so "sort by date" needs the most recent status change
+        // (e.g. just completed) to actually move a candidate, not their
+        // original start time (see InterviewList.tsx's identical fix).
+        const av = sortKey === 'score' ? (a.session?.overall_score ?? -1) : new Date(a.session?.updated_at ?? 0).getTime()
+        const bv = sortKey === 'score' ? (b.session?.overall_score ?? -1) : new Date(b.session?.updated_at ?? 0).getTime()
         return sortDesc ? bv - av : av - bv
       })
     }
@@ -331,12 +337,12 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
               className="accent-indigo-500"
               checked={
                 selected.size > 0 &&
-                pageRows.filter((r) => !hasFinalDecision(r.session)).every((r) => selected.has(r.candidate.id))
+                pageRows.filter((r) => !hasStartedInterview(r.session)).every((r) => selected.has(r.candidate.id))
               }
               onChange={(e) =>
                 setSelected(
                   e.target.checked
-                    ? new Set(pageRows.filter((r) => !hasFinalDecision(r.session)).map((r) => r.candidate.id))
+                    ? new Set(pageRows.filter((r) => !hasStartedInterview(r.session)).map((r) => r.candidate.id))
                     : new Set(),
                 )
               }
@@ -366,7 +372,7 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
               type="checkbox"
               className="accent-indigo-500 disabled:opacity-30"
               checked={selected.has(candidate.id)}
-              disabled={hasFinalDecision(session)}
+              disabled={hasStartedInterview(session)}
               onClick={(e) => e.stopPropagation()}
               onChange={() => toggleSelected(candidate.id)}
             />
@@ -385,9 +391,9 @@ function CandidateListPanel({ selectedCandidateId }: { selectedCandidateId: stri
                   <RecommendationBadge recommendation={effectiveRecommendation(session)!} />
                 </div>
               )}
-              {hasFinalDecision(session) ? (
+              {hasStartedInterview(session) ? (
                 <p className="mt-1.5 text-[11px] font-medium text-slate-600">
-                  Nihai karar verildi — davet gönderilemez.
+                  Aday mülakatını zaten başlattı/tamamladı — tekrar davet gönderilemez.
                 </p>
               ) : (
                 <button

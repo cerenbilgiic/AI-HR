@@ -79,7 +79,13 @@ export default function InterviewList() {
     if (positionFilter !== 'all') {
       result = result.filter((r) => String(r.session.job_id) === positionFilter)
     }
-    return result.sort((a, b) => new Date(b.session.created_at).getTime() - new Date(a.session.created_at).getTime())
+    // updated_at (not created_at) — created_at is fixed at the interview's
+    // start, so a session that was created a while ago but only just
+    // finished (status flips to awaiting_review/completed, which bumps
+    // updated_at via TimestampMixin's onupdate) needs to rank by that most
+    // recent change, or a freshly-completed interview wouldn't surface near
+    // the top the way HR expects.
+    return result.sort((a, b) => new Date(b.session.updated_at).getTime() - new Date(a.session.updated_at).getTime())
   }, [sessions, candidateById, jobById, search, statusFilter, positionFilter])
 
   useEffect(() => {

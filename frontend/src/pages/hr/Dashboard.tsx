@@ -131,9 +131,13 @@ export default function Dashboard() {
     { label: 'Beklemede', value: sessions.filter((s) => s.status === 'pending').length, colorClass: 'text-slate-400' },
   ]
 
+  // updated_at, not created_at — same fix as InterviewList.tsx/
+  // CandidateWorkspace.tsx: a session started a while ago but only just
+  // completed needs to show up here, not stay ranked by its original
+  // start time.
   const recentInterviews = sessions
     .slice()
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
     .slice(0, RECENT_COUNT)
 
   const recentCandidates = candidates

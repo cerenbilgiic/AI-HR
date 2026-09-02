@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import create_access_token
-from app.models.ai_score import InterviewReport
 from app.models.audit_log import AuditLog
 from app.models.candidate import Candidate
 from app.models.interview import InterviewSession
@@ -26,19 +25,21 @@ class InvitationEmailContent:
     paragraphs: list[str]
 
 
-def _has_final_decision(db: Session, candidate_id: int) -> bool:
-    """True once HR has recorded a final decision (Nihai Karar) on any of
-    this candidate's interview reports — create_session already refuses a
-    second interview attempt once one exists, so at that point re-inviting
-    them can only ever produce a dead link (they have no fresh session to
-    start) and, worse, reads as HR still actively considering someone whose
-    outcome is already settled."""
+def _has_started_interview(db: Session, candidate_id: int) -> bool:
+    """True once this candidate already has an interview session, in any
+    status — create_session refuses a second attempt regardless of whether
+    that one is in_progress, awaiting_review, completed, or terminated, so
+    at that point re-inviting them can only ever produce a dead link (they
+    have no fresh session to start).
+
+    Previously this only checked for a final HR decision (hr_decision),
+    which missed the whole window between "candidate finished, AI
+    evaluated" (status=completed) and "HR actually picked recommended/
+    maybe/not_recommended" — a candidate could still be re-invited during
+    that window even though their one-and-only interview was already over.
+    """
     return (
-        db.query(InterviewReport)
-        .join(InterviewSession, InterviewReport.session_id == InterviewSession.id)
-        .filter(InterviewSession.candidate_id == candidate_id, InterviewReport.hr_decision.isnot(None))
-        .first()
-        is not None
+        db.query(InterviewSession).filter(InterviewSession.candidate_id == candidate_id).first() is not None
     )
 
 
@@ -60,8 +61,8 @@ def _build_invitation_content(db: Session, candidate: Candidate) -> InvitationEm
     their own Gmail — the actual point of no return is generating the link
     at all, not recording that it was sent.
     """
-    if _has_final_decision(db, candidate.id):
-        raise ValueError("Bu aday için nihai karar zaten verildi; tekrar davet gönderilemez.")
+    if _has_started_interview(db, candidate.id):
+        raise ValueError("Bu aday mülakatını zaten tamamlamış veya başlatmış; tekrar davet gönderilemez.")
 
     job = db.get(Job, candidate.job_id)
     # Computed here rather than via candidate_service.compute_interview_deadline
