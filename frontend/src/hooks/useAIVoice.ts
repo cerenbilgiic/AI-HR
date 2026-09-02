@@ -90,5 +90,17 @@ export function useAIVoice(preferredGender: VoiceGender = 'female') {
     setSpeaking(false)
   }
 
-  return { speak, stop, speaking, muted, setMuted, supported }
+  // Muting only ever gated *future* speak() calls (via mutedRef) — it never
+  // touched whatever utterance was already in flight, so clicking mute
+  // while the AI was mid-sentence looked like the button did nothing until
+  // that sentence finished on its own. Cancel immediately when muting.
+  function toggleMuted() {
+    setMuted((m) => {
+      const next = !m
+      if (next) stop()
+      return next
+    })
+  }
+
+  return { speak, stop, speaking, muted, setMuted, toggleMuted, supported }
 }

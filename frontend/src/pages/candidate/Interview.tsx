@@ -92,7 +92,7 @@ export default function Interview() {
   const [canSpeakNow, setCanSpeakNow] = useState(false)
 
   const [avatarGender] = useState<AvatarGender>(getSelectedAvatarGender)
-  const { speak, stop, speaking, muted, setMuted, supported: ttsSupported } = useAIVoice(avatarGender)
+  const { speak, stop, speaking, muted, toggleMuted, supported: ttsSupported } = useAIVoice(avatarGender)
   const {
     transcript: voiceTranscript,
     listening,
@@ -378,10 +378,20 @@ export default function Interview() {
   // finishInterview's normal "awaiting_review"). They were warned about
   // this up front (INTRO_TEXT). Best-effort: they're leaving the active
   // screen regardless of whether this call succeeds.
+  //
+  // Uploads whatever was captured up to this point, same as finishInterview
+  // — this used to just stop the raw media tracks directly, which discarded
+  // the in-progress recording instead of saving it (see stopContinuousRecording),
+  // so a terminated session never had footage for HR's Integrity review even
+  // though that's exactly the case where reviewing it matters most.
   async function terminateSession() {
     if (!session) return
     stop()
     stopListening()
+    const blob = await stopContinuousRecording()
+    if (blob && blob.size > 0) {
+      await uploadFullRecording(blob)
+    }
     try {
       await candidateApiClient.post(`/interviews/${session.id}/terminate`)
     } catch {
@@ -669,7 +679,7 @@ export default function Interview() {
           </button>
           <button
             type="button"
-            onClick={() => setMuted((m) => !m)}
+            onClick={toggleMuted}
             className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
           >
             {muted ? '🔇 Sesi Aç' : '🔈 Sessize Al'}

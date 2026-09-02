@@ -53,7 +53,7 @@ export default function Consent() {
   const [testingDevices, setTestingDevices] = useState(false)
   const [deviceError, setDeviceError] = useState<string | null>(null)
 
-  const { speak, speaking, muted, setMuted } = useAIVoice()
+  const { speak, speaking, muted, toggleMuted } = useAIVoice()
 
   async function testDevices() {
     setTestingDevices(true)
@@ -121,7 +121,7 @@ export default function Consent() {
             </button>
             <button
               type="button"
-              onClick={() => setMuted((m) => !m)}
+              onClick={toggleMuted}
               className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
             >
               {muted ? '🔇 Sesi aç' : '🔈 Sesi kapat'}
